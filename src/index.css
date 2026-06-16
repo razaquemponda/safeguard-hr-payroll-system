@@ -1,0 +1,25 @@
+﻿@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+  }
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: #F8FAFC;
+}
+
+/* Custom Safeguard Security Styles */
+.gold-gradient {
+  background: linear-gradient(135deg, #D4A017 0%, #B8860B 100%);
+}
+
+.navy-gradient {
+  background: linear-gradient(135deg, #081C3A 0%, #0A2540 100%);
+}

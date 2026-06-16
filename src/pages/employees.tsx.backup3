@@ -1,0 +1,1743 @@
+﻿import { useState, useMemo, useEffect } from 'react';
+import { Search, Plus, Eye, Edit2, Trash2, Filter, Download, UserPlus } from 'lucide-react';
+import { Card, Button, Badge, THead, TBody, TR, TH, TD, Modal, PageHeader, Tabs } from '../components/ui';
+import { formatKwacha } from '../data';
+import { supabase } from '../lib/supabase';
+import { showNotification } from '../utils/clickHandlers';
+
+interface Employee {
+  id: string;
+  employeeNumber: string;
+  fullName: string;
+  gender: string;
+  age: number;
+  phone: string;
+  position: string;
+  department: string;
+  basicSalary: number;
+  status: string;
+  email: string;
+  dateHired: string;
+  dob?: string;
+  nationalId?: string;
+  address?: string;
+  qualification?: string;
+  contractType?: string;
+  payPoint?: string;
+  region_id?: string;
+  company?: string;
+  workstation?: string;
+  pay_point?: string;
+}
+
+// Department options
+const departmentOptions = [
+  'Operations (Guards, K9, Supervisors)',
+  'Finance',
+  'Logistics',
+  'Administration',
+  'Building',
+  'Marketing',
+  'Technical'
+];
+
+// Auto-format function for text fields
+const formatText = (value: string) => {
+  return value
+    .toUpperCase()
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/[^A-Z0-9\s]/g, '');
+};
+
+export function EmployeesPage() {
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [showAdd, setShowAdd] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [selected, setSelected] = useState<Employee | null>(null);
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+  const [regions, setRegions] = useState<any[]>([]);
+  const [filterRegionId, setFilterRegionId] = useState<string>('');
+  const [filterCompany, setFilterCompany] = useState<string>('');
+  const [filterWorkstation, setFilterWorkstation] = useState<string>('');
+  const [filterPayPoint, setFilterPayPoint] = useState<string>('');
+  
+  // User authentication state
+  const [userProfile, setUserProfile] = useState<any>(null);
+  const [userLoading, setUserLoading] = useState(true);
+
+  // Fetch current user profile
+  useEffect(() => {
+    const fetchUserProfile = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*, regions(*)')
+          .eq('id', user.id)
+          .single();
+        setUserProfile(profile);
+      }
+      setUserLoading(false);
+    };
+    fetchUserProfile();
+  }, []);
+
+  useEffect(() => {
+    fetchRegions();
+  }, []);
+
+  useEffect(() => {
+    if (!userLoading) {
+      fetchEmployees();
+    }
+  }, [filterRegionId, filterCompany, filterWorkstation, filterPayPoint, userProfile, userLoading]);
+
+  const fetchRegions = async () => {
+    const { data } = await supabase.from('regions').select('*');
+    setRegions(data || []);
+  };
+
+  const fetchEmployees = async () => {
+    setLoading(true);
+    try {
+      let query = supabase.from('employees').select('*');
+      
+      if (!userProfile?.is_super_admin && userProfile?.region_id) {
+        query = query.eq('region_id', userProfile.region_id);
+      }
+      
+      if (filterRegionId && userProfile?.is_super_admin) {
+        query = query.eq('region_id', filterRegionId);
+      }
+      if (filterCompany) query = query.ilike('company', `%${filterCompany}%`);
+      if (filterWorkstation) query = query.ilike('workstation', `%${filterWorkstation}%`);
+      if (filterPayPoint) query = query.eq('pay_point', filterPayPoint);
+      
+      const { data, error } = await query.order('full_name');
+      if (error) throw error;
+      
+      const mappedEmployees = (data || []).map((emp: any) => ({
+        id: emp.id,
+        employeeNumber: emp.employee_number,
+        fullName: emp.full_name,
+        gender: emp.gender || '',
+        age: emp.age || 0,
+        phone: emp.phone || '',
+        position: emp.position,
+        department: emp.department || 'Operations',
+        basicSalary: emp.basic_salary,
+        status: emp.status || 'Active',
+        email: emp.email || '',
+        dateHired: emp.hire_date || new Date().toISOString().split('T')[0],
+        dob: emp.dob && emp.dob !== '' ? emp.dob : null,
+        nationalId: emp.national_id,
+        address: emp.address,
+        qualification: emp.qualification,
+        contractType: emp.contract_type || 'Permanent',
+        payPoint: emp.pay_point,
+        region_id: emp.region_id,
+        company: emp.company,
+        workstation: emp.workstation,
+        pay_point: emp.pay_point
+      }));
+      setEmployees(mappedEmployees);
+    } catch (err: any) {
+      console.error('Error fetching employees:', err);
+      showNotification('Failed to load employees', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filtered = useMemo(() => {
+    return employees.filter(e => {
+      const matchesSearch = e.fullName.toLowerCase().includes(search.toLowerCase()) || 
+                           e.employeeNumber.toLowerCase().includes(search.toLowerCase()) || 
+                           e.position.toLowerCase().includes(search.toLowerCase());
+      const matchesFilter = statusFilter === 'all' || e.status === statusFilter;
+      return matchesSearch && matchesFilter;
+    });
+  }, [employees, search, statusFilter]);
+
+  const addEmployee = async (emp: any) => {
+    let assignedRegionId = emp.region_id;
+    if (!userProfile?.is_super_admin) {
+      assignedRegionId = userProfile?.region_id;
+    }
+    
+    if (userProfile?.is_super_admin && !assignedRegionId) {
+      showNotification('Please select a region', 'error');
+      return;
+    }
+    
+    const { data: existing } = await supabase
+      .from('employees')
+      .select('employee_number')
+      .eq('employee_number', emp.employeeNumber)
+      .single();
+    
+    if (existing) {
+      showNotification(`Employee number ${emp.employeeNumber} already exists!`, 'error');
+      return;
+    }
+    
+    const formattedCompany = emp.company ? formatText(emp.company) : null;
+    const formattedWorkstation = emp.workstation ? formatText(emp.workstation) : null;
+    
+    const { data, error } = await supabase
+      .from('employees')
+      .insert([{
+        employee_number: emp.employeeNumber,
+        full_name: emp.fullName,
+        gender: emp.gender,
+        age: parseInt(emp.age) || 0,
+        phone: emp.phone,
+        position: emp.position,
+        department: emp.department,
+        basic_salary: parseFloat(emp.basicSalary),
+        status: emp.status || 'Active',
+        email: emp.email,
+       hire_date: emp.dateHired && emp.dateHired !== '' ? emp.dateHired : new Date().toISOString().split('T')[0],
+        dob: emp.dob && emp.dob !== '' ? emp.dob : null,
+        national_id: emp.nationalId,
+        address: emp.address,
+        qualification: emp.qualification,
+        contract_type: emp.contractType,
+        region_id: assignedRegionId,
+        company: formattedCompany,
+        workstation: formattedWorkstation,
+        pay_point: emp.pay_point
+      }])
+      .select();
+    
+    if (error) {
+      showNotification('Error adding employee: ' + error.message, 'error');
+    } else if (data && data[0]) {
+      const newEmployee = {
+        id: data[0].id,
+        employeeNumber: data[0].employee_number,
+        fullName: data[0].full_name,
+        gender: data[0].gender || '',
+        age: data[0].age || 0,
+        phone: data[0].phone || '',
+        position: data[0].position,
+        department: data[0].department,
+        basicSalary: data[0].basic_salary,
+        status: data[0].status,
+        email: data[0].email || '',
+        dateHired: data[0].hire_date || new Date().toISOString().split('T')[0],
+        dob: data[0].dob,
+        nationalId: data[0].national_id,
+        address: data[0].address,
+        qualification: data[0].qualification,
+        contractType: data[0].contract_type,
+        region_id: data[0].region_id,
+        company: data[0].company,
+        workstation: data[0].workstation,
+        pay_point: data[0].pay_point
+      };
+      setEmployees([newEmployee, ...employees]);
+      showNotification(`${emp.fullName} has been added`, 'success');
+    }
+    setShowAdd(false);
+  };
+
+  const handleEdit = (employee: Employee) => {
+    if (!userProfile?.is_super_admin && employee.region_id !== userProfile?.region_id) {
+      showNotification('You cannot edit employees from other regions', 'error');
+      return;
+    }
+    setEditingEmployee(employee);
+    setShowEdit(true);
+  };
+
+  const updateEmployee = async (emp: any) => {
+    if (!editingEmployee) return;
+    
+    const formattedCompany = emp.company ? formatText(emp.company) : null;
+    const formattedWorkstation = emp.workstation ? formatText(emp.workstation) : null;
+    
+    const { data, error } = await supabase
+      .from('employees')
+      .update({
+        employee_number: emp.employeeNumber,
+        full_name: emp.fullName,
+        gender: emp.gender,
+        age: parseInt(emp.age) || 0,
+        phone: emp.phone,
+        position: emp.position,
+        department: emp.department,
+        basic_salary: parseFloat(emp.basicSalary),
+        status: emp.status,
+        email: emp.email,
+        hire_date: emp.dateHired && emp.dateHired !== '' ? emp.dateHired : null,
+        dob: emp.dob && emp.dob !== '' ? emp.dob : null,
+        national_id: emp.nationalId,
+        address: emp.address,
+        qualification: emp.qualification,
+        contract_type: emp.contractType,
+        company: formattedCompany,
+        workstation: formattedWorkstation,
+        pay_point: emp.pay_point
+      })
+      .eq('id', editingEmployee.id)
+      .select();
+    
+    if (error) {
+      showNotification('Error updating employee: ' + error.message, 'error');
+    } else if (data && data[0]) {
+      const updatedEmployee = {
+        ...editingEmployee,
+        employeeNumber: data[0].employee_number,
+        fullName: data[0].full_name,
+        gender: data[0].gender || '',
+        age: data[0].age || 0,
+        phone: data[0].phone || '',
+        position: data[0].position,
+        department: data[0].department,
+        basicSalary: data[0].basic_salary,
+        status: data[0].status,
+        email: data[0].email || '',
+        dateHired: data[0].hire_date || new Date().toISOString().split('T')[0],
+        dob: data[0].dob,
+        nationalId: data[0].national_id,
+        address: data[0].address,
+        qualification: data[0].qualification,
+        contractType: data[0].contract_type,
+        company: data[0].company,
+        workstation: data[0].workstation,
+        pay_point: data[0].pay_point
+      };
+      setEmployees(employees.map(e => e.id === updatedEmployee.id ? updatedEmployee : e));
+      showNotification(`${emp.fullName} has been updated`, 'success');
+    }
+    setShowEdit(false);
+    setEditingEmployee(null);
+  };
+
+  const handleDelete = async (employee: Employee) => {
+    if (!userProfile?.is_super_admin && employee.region_id !== userProfile?.region_id) {
+      showNotification('You cannot delete employees from other regions', 'error');
+      return;
+    }
+    
+    if (confirm(`Are you sure you want to delete ${employee.fullName}?`)) {
+      const { error } = await supabase
+        .from('employees')
+        .delete()
+        .eq('id', employee.id);
+      if (error) {
+        showNotification('Error deleting employee: ' + error.message, 'error');
+      } else {
+        setEmployees(employees.filter(e => e.id !== employee.id));
+        showNotification(`${employee.fullName} has been deleted`, 'success');
+      }
+    }
+  };
+
+  const handleExport = () => {
+    const csv = [
+      ['Employee ID', 'Full Name', 'Company', 'Workstation', 'Gender', 'Age', 'Phone', 'Position', 'Department', 'Basic Salary', 'Status', 'Pay Point'],
+      ...filtered.map(e => [
+        e.employeeNumber, e.fullName, e.company || '', e.workstation || '',
+        e.gender, e.age, e.phone, e.position, e.department, e.basicSalary, e.status, e.pay_point || ''
+      ])
+    ].map(row => row.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `employees_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showNotification(`Exported ${filtered.length} employees`, 'success');
+  };
+
+  const clearFilters = () => {
+    setFilterRegionId('');
+    setFilterCompany('');
+    setFilterWorkstation('');
+    setFilterPayPoint('');
+  };
+
+  if (userLoading || loading) return <div className="text-center py-8">Loading...</div>;
+  if (selected) return <EmployeeProfile employee={selected} onBack={() => setSelected(null)} />;
+
+  const isSuperAdmin = userProfile?.is_super_admin;
+  const userRegion = regions.find(r => r.id === userProfile?.region_id);
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader
+        title="Employee Management"
+        subtitle={isSuperAdmin ? "Complete database of all security personnel" : `${userRegion?.name || ''} - Security Personnel`}
+        actions={
+          <>
+            <Button variant="outline" className="hidden md:inline-flex"><Filter size={16} /> Filter</Button>
+            <Button variant="outline" className="hidden md:inline-flex" onClick={handleExport}><Download size={16} /> Export</Button>
+            <Button variant="secondary" onClick={() => setShowAdd(true)}><Plus size={16} /> Add Employee</Button>
+          </>
+        }
+      />
+
+      {!isSuperAdmin && userRegion && (
+        <Card className="p-3 bg-gradient-to-r from-[#081C3A]/5 to-transparent border-[#081C3A]/20">
+          <p className="text-sm text-slate-600">
+            Viewing employees in <strong className="text-[#081C3A]">{userRegion.name}</strong>
+          </p>
+        </Card>
+      )}
+
+      {isSuperAdmin && (
+        <Card className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+              <Filter size={14} /> Advanced Filters
+            </h4>
+            {(filterRegionId || filterCompany || filterWorkstation || filterPayPoint) && (
+              <Button variant="ghost" className="text-xs py-1 px-2" onClick={clearFilters} className="text-xs">
+                Clear all
+              </Button>
+            )}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Region</label>
+              <select
+                value={filterRegionId}
+                onChange={(e) => {
+                  setFilterRegionId(e.target.value);
+                  setFilterCompany('');
+                  setFilterWorkstation('');
+                }}
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg"
+              >
+                <option value="">All Regions</option>
+                {regions.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Company</label>
+              <input
+                type="text"
+                value={filterCompany}
+                onChange={(e) => setFilterCompany(e.target.value.toUpperCase())}
+                placeholder="Type company name..."
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg"
+              />
+              <p className="text-xs text-slate-400 mt-1">Partial match, case-insensitive</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Workstation</label>
+              <input
+                type="text"
+                value={filterWorkstation}
+                onChange={(e) => setFilterWorkstation(e.target.value.toUpperCase())}
+                placeholder="Type workstation..."
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg"
+              />
+              <p className="text-xs text-slate-400 mt-1">Partial match, case-insensitive</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Pay Point</label>
+              <select
+                value={filterPayPoint}
+                onChange={(e) => setFilterPayPoint(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg"
+              >
+                <option value="">All Pay Points</option>
+                <option value="national_bank">National Bank of Malawi</option>
+                <option value="standard_bank">Standard Bank</option>
+                <option value="nbs_bank">NBS Bank</option>
+                <option value="centenary_bank">Centenary Bank</option>
+                <option value="fdh_bank">FDH Bank</option>
+                <option value="first_capital_bank">First Capital Bank</option>
+                <option value="airtel_money">Airtel Money</option>
+                <option value="tnm_mpamba">TNM Mpamba</option>
+              </select>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: 'Total', n: employees.length },
+          { label: 'Active', n: employees.filter(e => e.status === 'Active').length },
+          { label: 'On Leave', n: employees.filter(e => e.status === 'On Leave').length },
+          { label: 'Suspended', n: employees.filter(e => e.status === 'Suspended').length }
+        ].map((s, i) => (
+          <Card key={i} className="p-4">
+            <p className="text-xs text-slate-500">{s.label}</p>
+            <p className="text-2xl font-bold text-slate-800 mt-1">{s.n}</p>
+          </Card>
+        ))}
+      </div>
+
+      <Card className="p-4 flex flex-col md:flex-row items-stretch md:items-center gap-3">
+        <div className="relative flex-1">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search by name, ID or position..."
+            className="w-full pl-10 pr-3 py-2.5 text-sm border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-[#081C3A]"
+          />
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          {[{ v: 'all', l: 'All' }, { v: 'Active', l: 'Active' }, { v: 'On Leave', l: 'On Leave' }, { v: 'Suspended', l: 'Suspended' }].map(f => (
+            <button key={f.v} onClick={() => setStatusFilter(f.v)} className={`px-3 py-2 text-xs font-medium rounded-lg transition-colors ${statusFilter === f.v ? 'bg-[#081C3A] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>{f.l}</button>
+          ))}
+        </div>
+      </Card>
+
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <THead>
+              <TR hover={false}>
+                <TH>Employee</TH>
+                <TH className="hidden lg:table-cell">Company</TH>
+                <TH className="hidden xl:table-cell">Workstation</TH>
+                <TH className="hidden md:table-cell">Phone</TH>
+                <TH>Position</TH>
+                <TH className="hidden lg:table-cell">Basic Salary</TH>
+                <TH>Status</TH>
+                <TH className="text-right">Actions</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {filtered.slice(0, 50).map(emp => (
+                <TR key={emp.id} onClick={() => setSelected(emp)}>
+                  <TD>
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-[#081C3A] flex items-center justify-center text-white text-xs font-bold shrink-0">
+                        {emp.fullName.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-slate-800">{emp.fullName}</p>
+                        <p className="text-xs text-slate-500">{emp.employeeNumber}</p>
+                      </div>
+                    </div>
+                  </TD>
+                  <TD className="hidden lg:table-cell">{emp.company || '-'}</TD>
+                  <TD className="hidden xl:table-cell">{emp.workstation || '-'}</TD>
+                  <TD className="hidden md:table-cell">{emp.phone || '-'}</TD>
+                  <TD>{emp.position}</TD>
+                  <TD className="hidden lg:table-cell font-medium">{formatKwacha(emp.basicSalary)}</TD>
+                  <TD><Badge color={emp.status === 'Active' ? 'green' : emp.status === 'On Leave' ? 'yellow' : 'red'}>{emp.status}</Badge></TD>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                      <button onClick={() => setSelected(emp)} className="w-8 h-8 rounded-lg hover:bg-slate-100 text-slate-600 flex items-center justify-center"><Eye size={14} /></button>
+                      <button onClick={() => handleEdit(emp)} className="w-8 h-8 rounded-lg hover:bg-slate-100 text-slate-600 flex items-center justify-center"><Edit2 size={14} /></button>
+                      <button onClick={() => handleDelete(emp)} className="w-8 h-8 rounded-lg hover:bg-red-50 text-red-500 flex items-center justify-center"><Trash2 size={14} /></button>
+                    </div>
+                  </td>
+                </TR>
+              ))}
+            </TBody>
+          </table>
+        </div>
+        <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+          <span>Showing {Math.min(50, filtered.length)} of {filtered.length} employees</span>
+          <div className="flex items-center gap-1">
+            <button className="px-3 py-1.5 rounded-md border border-slate-200 hover:bg-slate-50">Previous</button>
+            <button className="px-3 py-1.5 rounded-md bg-[#081C3A] text-white">1</button>
+            <button className="px-3 py-1.5 rounded-md border border-slate-200 hover:bg-slate-50">Next</button>
+          </div>
+        </div>
+      </div>
+
+      <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Add New Employee" size="xl">
+        <AddEmployeeForm 
+          onSubmit={addEmployee} 
+          onCancel={() => setShowAdd(false)} 
+          departments={departmentOptions} 
+          regions={regions}
+          userRegionId={userProfile?.region_id}
+          isSuperAdmin={isSuperAdmin}
+          userRegionName={userRegion?.name}
+        />
+      </Modal>
+
+      <Modal open={showEdit} onClose={() => { setShowEdit(false); setEditingEmployee(null); }} title="Edit Employee" size="xl">
+        {editingEmployee && (
+          <EditEmployeeForm 
+            employee={editingEmployee}
+            onSubmit={updateEmployee} 
+            onCancel={() => { setShowEdit(false); setEditingEmployee(null); }} 
+            departments={departmentOptions} 
+            regions={regions}
+            isSuperAdmin={isSuperAdmin}
+          />
+        )}
+      </Modal>
+    </div>
+  );
+}
+
+// AddEmployeeForm Component
+function AddEmployeeForm({ onSubmit, onCancel, departments, regions, userRegionId, isSuperAdmin, userRegionName }: { 
+  onSubmit: (e: any) => void; 
+  onCancel: () => void; 
+  departments: string[]; 
+  regions: any[];
+  userRegionId?: string;
+  isSuperAdmin?: boolean;
+  userRegionName?: string;
+}) {
+  const [form, setForm] = useState<any>({
+    employeeNumber: '', 
+    fullName: '', 
+    dob: '', 
+    gender: 'Male',
+    nationalId: '', 
+    phone: '', 
+    address: '', 
+    position: 'Security Guard', 
+    department: departments[0],
+    qualification: 'standard 8', 
+    dateHired: new Date().toISOString().slice(0, 10), 
+    basicSalary: 550000,
+    contractType: 'Permanent', 
+    status: 'Active', 
+    email: '',
+    region_id: userRegionId || '', 
+    company: '', 
+    workstation: '', 
+    pay_point: ''
+  });
+  
+  const update = (k: string, v: any) => {
+    setForm({ ...form, [k]: v });
+  };
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.employeeNumber || !form.fullName) {
+      alert('Please fill in Employee Number and Full Name');
+      return;
+    }
+    if (!form.phone) {
+      alert('Please enter phone number');
+      return;
+    }
+    if (isSuperAdmin && !form.region_id) {
+      alert('Please select a region');
+      return;
+    }
+    onSubmit(form);
+  };
+
+  const field = (k: string, label: string, type = 'text', required = false, options?: { label: string; value: string }[]) => (
+    <div>
+      <label className="block text-sm font-medium text-slate-700 mb-1.5">{label}{required && <span className="text-red-500 ml-1">*</span>}</label>
+      {options ? (
+        <select 
+          value={form[k] || ''} 
+          onChange={e => update(k, e.target.value)} 
+          className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A] bg-white"
+        >
+          <option value="">Select {label}</option>
+          {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      ) : (
+        <input 
+          type={type} 
+          value={form[k] || ''} 
+          onChange={e => update(k, e.target.value)} 
+          className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A]" 
+          required={required}
+        />
+      )}
+    </div>
+  );
+
+  return (
+    <form onSubmit={submit} className="space-y-6">
+      <div className="p-4 rounded-lg bg-[#E8EDF5] text-sm text-slate-700 flex items-start gap-3">
+        <UserPlus size={18} className="text-[#081C3A] shrink-0 mt-0.5" />
+        <div>
+          <strong>Employment Form</strong><br />
+          Complete all required fields. Employee will be added to active records.
+          {!isSuperAdmin && userRegionName && (
+            <span className="block mt-1 text-xs text-[#D4A017]">Will be assigned to: {userRegionName}</span>
+          )}
+        </div>
+      </div>
+
+      <div>
+        <h4 className="font-semibold text-slate-800 mb-3 text-sm">Personal Information</h4>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {field('employeeNumber', 'Employee Number', 'text', true)}
+          {field('fullName', 'Full Name', 'text', true)}
+          {field('dob', 'Date of Birth', 'date')}
+          {field('gender', 'Gender', 'text', false, [
+            { label: 'Male', value: 'Male' }, { label: 'Female', value: 'Female' }
+          ])}
+          {field('nationalId', 'National ID')}
+          {field('phone', 'Phone Number', 'tel', true)}
+        </div>
+        <div className="mt-4">{field('address', 'Residential Address')}</div>
+      </div>
+
+      <div>
+        <h4 className="font-semibold text-slate-800 mb-3 text-sm">Employment Information</h4>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {field('position', 'Position', 'text', false, [
+            { label: 'Security Guard', value: 'Security Guard' }, 
+            { label: 'Senior Security Officer', value: 'Senior Security Officer' },
+            { label: 'Supervisor', value: 'Supervisor' }, 
+            { label: 'Manager', value: 'Manager' },
+            { label: 'Staff', value: 'Staff' }, 
+            { label: 'HR', value: 'HR' }
+          ])}
+          {field('department', 'Department', 'text', false, departments.map(d => ({ label: d, value: d })))}
+          {field('qualification', 'Qualification')}
+          {field('dateHired', 'Date Hired', 'date')}
+          {field('contractType', 'Contract Type', 'text', false, [
+            { label: 'Permanent', value: 'Permanent' }, 
+            { label: 'Contract', value: 'Contract' }, 
+            { label: 'Part-time', value: 'Part-time' }
+          ])}
+          {field('status', 'Status', 'text', false, [
+            { label: 'Active', value: 'Active' }, 
+            { label: 'On Leave', value: 'On Leave' }, 
+            { label: 'Suspended', value: 'Suspended' }
+          ])}
+        </div>
+      </div>
+
+      <div>
+        <h4 className="font-semibold text-slate-800 mb-3 text-sm">Company & Location</h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Company</label>
+            <input 
+              type="text" 
+              value={form.company || ''} 
+              onChange={e => {
+                let val = e.target.value.toUpperCase().trim();
+                val = val.replace(/[^A-Z0-9\s]/g, '');
+                val = val.replace(/\s+/g, ' ');
+                update('company', val);
+              }}
+              placeholder="e.g., MASM, AHL, TCC"
+              className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A] uppercase"
+            />
+            <p className="text-xs text-slate-400 mt-1">Auto-formatted to UPPERCASE</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Workstation / Site</label>
+            <input 
+              type="text" 
+              value={form.workstation || ''} 
+              onChange={e => {
+                let val = e.target.value.toUpperCase().trim();
+                val = val.replace(/[^A-Z0-9\s]/g, '');
+                val = val.replace(/\s+/g, ' ');
+                update('workstation', val);
+              }}
+              placeholder="e.g., CLINIC, MAIN OFFICE, GATE 1"
+              className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A] uppercase"
+            />
+            <p className="text-xs text-slate-400 mt-1">Auto-formatted to UPPERCASE</p>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h4 className="font-semibold text-slate-800 mb-3 text-sm">Compensation & Payment</h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Basic Salary (MK)</label>
+            <input 
+              type="number" 
+              value={form.basicSalary} 
+              onChange={e => update('basicSalary', Number(e.target.value))} 
+              className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A]" 
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Pay Point</label>
+            <select 
+              value={form.pay_point || ''} 
+              onChange={e => update('pay_point', e.target.value)} 
+              className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A] bg-white"
+            >
+              <option value="">Select Pay Point</option>
+              <option value="national_bank">National Bank of Malawi</option>
+              <option value="standard_bank">Standard Bank</option>
+              <option value="nbs_bank">NBS Bank</option>
+              <option value="centenary_bank">Centenary Bank</option>
+              <option value="fdh_bank">FDH Bank</option>
+              <option value="first_capital_bank">First Capital Bank</option>
+              <option value="airtel_money">Airtel Money</option>
+              <option value="tnm_mpamba">TNM Mpamba</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h4 className="font-semibold text-slate-800 mb-3 text-sm">Region</h4>
+        <div className="grid grid-cols-1 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Region <span className="text-red-500">*</span></label>
+            {isSuperAdmin ? (
+              <select 
+                value={form.region_id || ''} 
+                onChange={e => update('region_id', e.target.value)} 
+                className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A] bg-white"
+                required
+              >
+                <option value="">-- Please select a region --</option>
+                {regions.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            ) : (
+              <input type="text" value={userRegionName || ''} disabled className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-slate-50" />
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
+        <button type="button" onClick={onCancel} className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-medium hover:bg-slate-50">Cancel</button>
+        <button type="submit" className="px-5 py-2 rounded-lg bg-[#D4A017] text-white text-sm font-semibold hover:bg-[#e8b82e]">? Hire Employee</button>
+      </div>
+    </form>
+  );
+}
+
+// EditEmployeeForm Component
+function EditEmployeeForm({ employee, onSubmit, onCancel, departments, regions, isSuperAdmin }: { 
+  employee: Employee;
+  onSubmit: (e: any) => void; 
+  onCancel: () => void; 
+  departments: string[]; 
+  regions: any[];
+  isSuperAdmin?: boolean;
+}) {
+  const [form, setForm] = useState<any>({
+    employeeNumber: employee.employeeNumber,
+    fullName: employee.fullName,
+    dob: employee.dob || '',
+    gender: employee.gender || 'Male',
+    nationalId: employee.nationalId || '',
+    phone: employee.phone || '',
+    address: employee.address || '',
+    position: employee.position,
+    department: employee.department,
+    qualification: employee.qualification || '',
+    dateHired: employee.dateHired,
+    basicSalary: employee.basicSalary,
+    contractType: employee.contractType || 'Permanent',
+    status: employee.status,
+    email: employee.email || '',
+    region_id: employee.region_id || '',
+    company: employee.company || '',
+    workstation: employee.workstation || '',
+    pay_point: employee.pay_point || ''
+  });
+  
+  const update = (k: string, v: any) => {
+    setForm({ ...form, [k]: v });
+  };
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.employeeNumber || !form.fullName) {
+      alert('Please fill in Employee Number and Full Name');
+      return;
+    }
+    if (!form.phone) {
+      alert('Please enter phone number');
+      return;
+    }
+    onSubmit(form);
+  };
+
+  const field = (k: string, label: string, type = 'text', required = false, options?: { label: string; value: string }[]) => (
+    <div>
+      <label className="block text-sm font-medium text-slate-700 mb-1.5">{label}{required && <span className="text-red-500 ml-1">*</span>}</label>
+      {options ? (
+        <select 
+          value={form[k] || ''} 
+          onChange={e => update(k, e.target.value)} 
+          className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A] bg-white"
+        >
+          <option value="">Select {label}</option>
+          {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      ) : (
+        <input 
+          type={type} 
+          value={form[k] || ''} 
+          onChange={e => update(k, e.target.value)} 
+          className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A]" 
+          required={required}
+        />
+      )}
+    </div>
+  );
+
+  return (
+    <form onSubmit={submit} className="space-y-6">
+      <div className="p-4 rounded-lg bg-[#E8EDF5] text-sm text-slate-700 flex items-start gap-3">
+        <UserPlus size={18} className="text-[#081C3A] shrink-0 mt-0.5" />
+        <div>
+          <strong>Edit Employee</strong><br />
+          Update employee information below.
+        </div>
+      </div>
+
+      <div>
+        <h4 className="font-semibold text-slate-800 mb-3 text-sm">Personal Information</h4>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {field('employeeNumber', 'Employee Number', 'text', true)}
+          {field('fullName', 'Full Name', 'text', true)}
+          {field('dob', 'Date of Birth', 'date')}
+          {field('gender', 'Gender', 'text', false, [
+            { label: 'Male', value: 'Male' }, { label: 'Female', value: 'Female' }
+          ])}
+          {field('nationalId', 'National ID')}
+          {field('phone', 'Phone Number', 'tel', true)}
+        </div>
+        <div className="mt-4">{field('address', 'Residential Address')}</div>
+      </div>
+
+      <div>
+        <h4 className="font-semibold text-slate-800 mb-3 text-sm">Employment Information</h4>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {field('position', 'Position', 'text', false, [
+            { label: 'Security Guard', value: 'Security Guard' }, 
+            { label: 'Senior Security Officer', value: 'Senior Security Officer' },
+            { label: 'Supervisor', value: 'Supervisor' }, 
+            { label: 'Manager', value: 'Manager' },
+            { label: 'Staff', value: 'Staff' }, 
+            { label: 'HR', value: 'HR' }
+          ])}
+          {field('department', 'Department', 'text', false, departments.map(d => ({ label: d, value: d })))}
+          {field('qualification', 'Qualification')}
+          {field('dateHired', 'Date Hired', 'date')}
+          {field('contractType', 'Contract Type', 'text', false, [
+            { label: 'Permanent', value: 'Permanent' }, 
+            { label: 'Contract', value: 'Contract' }, 
+            { label: 'Part-time', value: 'Part-time' }
+          ])}
+          {field('status', 'Status', 'text', false, [
+            { label: 'Active', value: 'Active' }, 
+            { label: 'On Leave', value: 'On Leave' }, 
+            { label: 'Suspended', value: 'Suspended' }
+          ])}
+        </div>
+      </div>
+
+      <div>
+        <h4 className="font-semibold text-slate-800 mb-3 text-sm">Company & Location</h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Company</label>
+            <input 
+              type="text" 
+              value={form.company || ''} 
+              onChange={e => {
+                let val = e.target.value.toUpperCase().trim();
+                val = val.replace(/[^A-Z0-9\s]/g, '');
+                val = val.replace(/\s+/g, ' ');
+                update('company', val);
+              }}
+              placeholder="e.g., MASM, AHL, TCC"
+              className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A] uppercase"
+            />
+            <p className="text-xs text-slate-400 mt-1">Auto-formatted to UPPERCASE</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Workstation / Site</label>
+            <input 
+              type="text" 
+              value={form.workstation || ''} 
+              onChange={e => {
+                let val = e.target.value.toUpperCase().trim();
+                val = val.replace(/[^A-Z0-9\s]/g, '');
+                val = val.replace(/\s+/g, ' ');
+                update('workstation', val);
+              }}
+              placeholder="e.g., CLINIC, MAIN OFFICE, GATE 1"
+              className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A] uppercase"
+            />
+            <p className="text-xs text-slate-400 mt-1">Auto-formatted to UPPERCASE</p>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h4 className="font-semibold text-slate-800 mb-3 text-sm">Compensation & Payment</h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Basic Salary (MK)</label>
+            <input 
+              type="number" 
+              value={form.basicSalary} 
+              onChange={e => update('basicSalary', Number(e.target.value))} 
+              className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A]" 
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Pay Point</label>
+            <select 
+              value={form.pay_point || ''} 
+              onChange={e => update('pay_point', e.target.value)} 
+              className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A] bg-white"
+            >
+              <option value="">Select Pay Point</option>
+              <option value="national_bank">National Bank of Malawi</option>
+              <option value="standard_bank">Standard Bank</option>
+              <option value="nbs_bank">NBS Bank</option>
+              <option value="centenary_bank">Centenary Bank</option>
+              <option value="fdh_bank">FDH Bank</option>
+              <option value="first_capital_bank">First Capital Bank</option>
+              <option value="airtel_money">Airtel Money</option>
+              <option value="tnm_mpamba">TNM Mpamba</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
+        <button type="button" onClick={onCancel} className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-medium hover:bg-slate-50">Cancel</button>
+        <button type="submit" className="px-5 py-2 rounded-lg bg-[#D4A017] text-white text-sm font-semibold hover:bg-[#e8b82e]">? Update Employee</button>
+      </div>
+    </form>
+  );
+}
+
+// EmployeeProfile Component
+function EmployeeProfile({ employee, onBack }: { employee: Employee; onBack: () => void }) {
+  const [tab, setTab] = useState('profile');
+  
+  const tabs = [
+    { id: 'profile', label: 'Overview' }, { id: 'payroll', label: 'Payroll' },
+    { id: 'attendance', label: 'Attendance' }, { id: 'documents', label: 'Documents' }
+  ];
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <button onClick={onBack} className="text-sm text-slate-600 hover:text-[#081C3A] flex items-center gap-2">? Back to Employees</button>
+
+      <Card className="p-6 bg-gradient-to-br from-[#081C3A] to-[#1a2f5c] text-white border-0">
+        <div className="flex flex-col md:flex-row gap-6 items-start">
+          <div className="w-24 h-24 rounded-2xl bg-[#D4A017] flex items-center justify-center text-white text-3xl font-bold shadow-xl shrink-0">
+            {employee.fullName.split(' ').map(n => n[0]).join('').slice(0, 2)}
+          </div>
+          <div className="flex-1">
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              <h2 className="text-2xl font-bold">{employee.fullName}</h2>
+              <Badge color={employee.status === 'Active' ? 'green' : 'yellow'}>{employee.status}</Badge>
+              <Badge color="gold">{employee.contractType || 'Permanent'}</Badge>
+            </div>
+            <p className="text-white/70 mb-4">{employee.position} � {employee.department} � {employee.employeeNumber}</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div><p className="text-xs text-white/60">Phone</p><p className="text-sm">{employee.phone || '-'}</p></div>
+              <div><p className="text-xs text-white/60">Email</p><p className="text-sm truncate">{employee.email || '-'}</p></div>
+              <div><p className="text-xs text-white/60">Hired</p><p className="text-sm">{employee.dateHired}</p></div>
+              <div><p className="text-xs text-white/60">Basic Salary</p><p className="text-sm font-semibold">{formatKwacha(employee.basicSalary)}</p></div>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <Tabs tabs={tabs} active={tab} onChange={setTab} />
+
+      {tab === 'profile' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Card className="p-6">
+            <h3 className="font-semibold text-slate-800 mb-4">Personal Information</h3>
+            <div className="space-y-3 text-sm">
+              {[
+                ['Full Name', employee.fullName], ['Gender', employee.gender], ['Age', String(employee.age)],
+                ['Date of Birth', employee.dob || '-'], ['National ID', employee.nationalId || '-'], ['Phone', employee.phone || '-'],
+                ['Address', employee.address || '-'], ['Email', employee.email || '-']
+              ].map(([k, v]) => (
+                <div key={k} className="flex justify-between border-b border-slate-100 pb-2">
+                  <span className="text-slate-500">{k}</span><span className="font-medium text-slate-800">{v}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card className="p-6">
+            <h3 className="font-semibold text-slate-800 mb-4">Employment Information</h3>
+            <div className="space-y-3 text-sm">
+              {[
+                ['Position', employee.position], ['Department', employee.department], ['Qualification', employee.qualification || '-'],
+                ['Date Hired', employee.dateHired], ['Contract Type', employee.contractType || 'Permanent'],
+                ['Company', employee.company || '-'], ['Workstation', employee.workstation || '-'],
+                ['Pay Point', employee.pay_point || '-'], ['Status', employee.status]
+              ].map(([k, v]) => (
+                <div key={k} className="flex justify-between border-b border-slate-100 pb-2">
+                  <span className="text-slate-500">{k}</span><span className="font-medium text-slate-800">{v}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card className="p-6">
+            <h3 className="font-semibold text-slate-800 mb-4">Payroll Information</h3>
+            <div className="space-y-3 text-sm">
+              {[
+                ['Basic Salary', formatKwacha(employee.basicSalary)],
+                ['Allowances (10%)', formatKwacha(Math.round(employee.basicSalary * 0.1))],
+                ['Overtime (5%)', formatKwacha(Math.round(employee.basicSalary * 0.05))],
+                ['Gross Pay', formatKwacha(Math.round(employee.basicSalary * 1.15))],
+                ['PAYE (30%)', formatKwacha(Math.round(employee.basicSalary * 1.15 * 0.3))],
+                ['Pension (5%)', formatKwacha(Math.round(employee.basicSalary * 1.15 * 0.05))],
+                ['Net Pay', formatKwacha(Math.round(employee.basicSalary * 1.15 * 0.65))]
+              ].map(([k, v]) => (
+                <div key={k} className="flex justify-between border-b border-slate-100 pb-2">
+                  <span className="text-slate-500">{k}</span><span className="font-medium text-slate-800">{v}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {tab === 'payroll' && (
+        <Card className="p-6">
+          <h3 className="font-semibold text-slate-800 mb-4">Payroll History</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {['July 2025', 'August 2025', 'September 2025', 'October 2025', 'November 2025'].map(period => (
+              <div key={period} className="p-4 rounded-lg border border-slate-100 hover:border-[#081C3A] transition-colors">
+                <p className="text-xs text-slate-500">{period}</p>
+                <p className="text-lg font-bold text-slate-800 mt-1">{formatKwacha(Math.round(employee.basicSalary * 1.15 * 0.65))}</p>
+                <p className="text-xs text-slate-500 mt-1">Net Pay</p>
+                <Button variant="outline" className="mt-3 text-xs w-full py-1.5">View Payslip</Button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {tab === 'attendance' && (
+        <Card className="p-6">
+          <h3 className="font-semibold text-slate-800 mb-4">Recent Attendance � November 2025</h3>
+          <div className="grid grid-cols-7 md:grid-cols-15 gap-1.5">
+            {Array.from({ length: 30 }, (_, i) => {
+              const r = (i * 17) % 10;
+              let s = 'P', c = 'bg-emerald-500';
+              if (r > 8) { s = 'A'; c = 'bg-red-400'; }
+              else if (r > 7) { s = 'L'; c = 'bg-yellow-400'; }
+              else if (r > 6) { s = 'LV'; c = 'bg-blue-400'; }
+              return (
+                <div key={i} className="flex flex-col items-center">
+                  <div className={`w-full aspect-square rounded flex items-center justify-center text-white text-xs font-semibold ${c}`}>{s}</div>
+                  <span className="text-[10px] text-slate-500 mt-1">{i + 1}</span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex gap-4 mt-6 text-xs flex-wrap">
+            <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-emerald-500" /> Present</span>
+            <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-red-400" /> Absent</span>
+            <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-yellow-400" /> Late</span>
+            <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-blue-400" /> Leave</span>
+          </div>
+        </Card>
+      )}
+
+      {tab === 'documents' && (
+        <Card className="p-6">
+          <h3 className="font-semibold text-slate-800 mb-4">Employee Documents</h3>
+          <div className="space-y-2">
+            {['Contract Agreement.pdf', 'Certified ID Copy.pdf', 'Qualification Certificate.pdf', 'Security License.pdf', 'Medical Report.pdf'].map((f, i) => (
+              <div key={i} className="flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 border border-slate-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded bg-red-50 text-red-600 flex items-center justify-center font-bold text-xs">PDF</div>
+                  <span className="text-sm text-slate-800">{f}</span>
+                </div>
+                <Button variant="outline" className="text-xs py-1.5">Download</Button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+
+* misc.tsx backup*
+
+import { useState, useMemo, useEffect } from 'react';
+import { Shield, FileDown, FileText, FileSpreadsheet, Download, Printer, Plus, Trash2, Edit2, Search, MapPin, CheckCircle, Map, Building2, Car, Sparkles, Bot, Percent, CreditCard, Camera, ClipboardList } from 'lucide-react';
+import { Card, Button, Badge, PageHeader, THead, TBody, TR, TH, TD, Modal, Tabs, Input } from '../components/ui';
+import { generateEmployees, formatKwacha, computePayroll, netPay, grossPay, Employee } from '../data';
+import { UserManagement } from '../components/UserManagement';  
+
+/* ----------------- PAYSLIPS PAGE ----------------- */
+export function PayslipsPage() {
+  const employees = useMemo(() => generateEmployees(245), []);
+  const [search, setSearch] = useState('');
+  const [view, setView] = useState<Employee | null>(null);
+  const filtered = employees.filter(e => e.fullName.toLowerCase().includes(search.toLowerCase()) || e.employeeNumber.toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader title="Payslips" subtitle="Generate and print professional payslips" actions={<><Button variant="outline"><FileText size={16} /> November 2025</Button><Button variant="secondary"><FileDown size={16} /> Bulk Download</Button></>} />
+      <Card className="p-4 flex flex-col md:flex-row items-stretch md:items-center gap-3">
+        <div className="relative flex-1"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search employees..." className="w-full pl-10 pr-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A]" /></div>
+        <div className="text-sm text-slate-500">{filtered.length} payslips ready</div>
+      </Card>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {filtered.slice(0, 18).map(emp => {
+          const p = computePayroll(emp);
+          return (
+            <Card key={emp.id} className="p-5 hover:shadow-lg cursor-pointer transition-shadow" onClick={() => setView(emp)}>
+              <div className="flex items-start justify-between mb-4"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-lg bg-[#081C3A] text-white text-xs font-bold flex items-center justify-center">{emp.fullName.split(' ').map(n => n[0]).join('').slice(0, 2)}</div><div><p className="font-semibold text-slate-800 text-sm">{emp.fullName}</p><p className="text-xs text-slate-500">{emp.employeeNumber}</p></div></div><Badge color="green">Processed</Badge></div>
+              <div className="border-t border-slate-100 pt-4"><p className="text-xs text-slate-500 mb-1">November 2025 � Net Pay</p><p className="text-2xl font-bold text-[#081C3A]">{formatKwacha(netPay(p))}</p><div className="flex gap-2 mt-4"><Button variant="outline" className="text-xs py-1.5 flex-1"><Printer size={12} /> Print</Button><Button variant="secondary" className="text-xs py-1.5 flex-1"><Download size={12} /> PDF</Button></div></div>
+            </Card>
+          );
+        })}
+      </div>
+      <Modal open={!!view} onClose={() => setView(null)} title="Payslip Preview" size="lg">{view && <PayslipPDF employee={view} />}</Modal>
+    </div>
+  );
+}
+
+function PayslipPDF({ employee }: { employee: Employee }) {
+  const p = computePayroll(employee);
+  const g = grossPay(p);
+  const n = netPay(p);
+  return (
+    <div className="space-y-5">
+      <div className="p-6 rounded-lg border-2 border-slate-200 bg-white" id="payslip-content">
+        <div className="flex items-start justify-between pb-4 border-b-2 border-[#081C3A]"><div className="flex items-center gap-3"><div className="w-14 h-14 rounded-xl bg-[#081C3A] flex items-center justify-center"><Shield size={24} className="text-[#D4A017]" /></div><div><h1 className="text-xl font-bold text-[#081C3A]">SAFEGUARD SECURITY SERVICES</h1><p className="text-xs text-slate-500">Lilongwe, Malawi � (+265) 1 234 567</p></div></div><div className="text-right"><p className="text-sm font-bold text-[#081C3A]">PAYSLIP</p><p className="text-xs text-slate-500">November 2025</p></div></div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 py-4 text-xs border-b border-slate-100"><div><p className="text-slate-500">Employee</p><p className="font-semibold text-slate-800">{employee.fullName}</p></div><div><p className="text-slate-500">Employee No.</p><p className="font-semibold text-slate-800">{employee.employeeNumber}</p></div><div><p className="text-slate-500">Position</p><p className="font-semibold text-slate-800">{employee.position}</p></div><div><p className="text-slate-500">Department</p><p className="font-semibold text-slate-800">{employee.department}</p></div><div><p className="text-slate-500">Pay Period</p><p className="font-semibold text-slate-800">Nov 01 - Nov 30, 2025</p></div><div><p className="text-slate-500">Pay Point</p><p className="font-semibold text-slate-800">{employee.payPoint}</p></div><div><p className="text-slate-500">Contract</p><p className="font-semibold text-slate-800">{employee.contractType}</p></div><div><p className="text-slate-500">Date Paid</p><p className="font-semibold text-slate-800">Nov 30, 2025</p></div></div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4"><div><h3 className="text-xs font-bold text-[#081C3A] uppercase tracking-wider mb-3 pb-2 border-b border-slate-200">Earnings</h3><div className="space-y-2 text-xs">{[['Basic Salary', p.basic], ['Allowances', p.allowances], ['Overtime', p.overtime], ['Bonus', p.bonus]].map(([k, v]) => (<div key={String(k)} className="flex justify-between"><span className="text-slate-600">{k}</span><span className="font-mono text-slate-800">{formatKwacha(v as number)}</span></div>))}<div className="flex justify-between pt-2 mt-2 border-t border-slate-200 font-bold"><span>Gross Pay</span><span className="font-mono text-[#081C3A]">{formatKwacha(g)}</span></div></div></div><div><h3 className="text-xs font-bold text-[#081C3A] uppercase tracking-wider mb-3 pb-2 border-b border-slate-200">Deductions</h3><div className="space-y-2 text-xs">{[['PAYE Tax', p.paye], ['Pension (5%)', p.pension], ['Absenteeism', p.absenteeism], ['Other Deductions', p.otherDeductions]].map(([k, v]) => (<div key={String(k)} className="flex justify-between"><span className="text-slate-600">{k}</span><span className="font-mono text-red-600">-{formatKwacha(v as number)}</span></div>))}<div className="flex justify-between pt-2 mt-2 border-t border-slate-200 font-bold"><span>Total Deductions</span><span className="font-mono text-red-600">-{formatKwacha(p.paye + p.pension)}</span></div></div></div></div>
+        <div className="p-5 rounded-lg bg-gradient-to-r from-[#081C3A] to-[#1a2f5c] text-white flex items-center justify-between"><div><p className="text-xs opacity-80 uppercase tracking-wider">Total Net Pay</p><p className="text-3xl font-bold text-[#D4A017]">{formatKwacha(n)}</p></div><div className="text-right text-xs"><p className="opacity-80">Payment Method: Bank Transfer</p><p className="opacity-80">Authorized: William Banda (Admin)</p></div></div>
+        <p className="text-center text-xs text-slate-400 mt-4">This is a system-generated payslip. No signature required.</p>
+      </div>
+      <div className="flex items-center justify-end gap-2"><Button variant="outline"><Printer size={14} /> Print</Button><Button variant="secondary"><Download size={14} /> Download PDF</Button></div>
+    </div>
+  );
+}
+
+/* ----------------- REPORTS ----------------- */
+export function ReportsPage() {
+  const [active, setActive] = useState('employee');
+  const tabs = [{ id: 'employee', label: 'Employee Report' }, { id: 'payroll', label: 'Payroll Report' }, { id: 'attendance', label: 'Attendance Report' }, { id: 'recruitment', label: 'Recruitment Report' }, { id: 'department', label: 'Department Report' }];
+  const employees = generateEmployees(245);
+  const totalPayroll = employees.reduce((sum, e) => sum + netPay(computePayroll(e)), 0);
+  const byDept: Record<string, { count: number; total: number }> = {};
+  employees.forEach(e => { if (!byDept[e.department]) byDept[e.department] = { count: 0, total: 0 }; byDept[e.department].count++; byDept[e.department].total += netPay(computePayroll(e)); });
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader title="Reports & Analytics" subtitle="Comprehensive business intelligence dashboard" actions={<><Button variant="outline"><FileDown size={16} /> PDF</Button><Button variant="outline"><FileSpreadsheet size={16} /> Excel</Button><Button variant="secondary"><FileText size={16} /> CSV</Button></>} />
+      <Card className="p-5"><div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">{[{ l: 'Total Employees', n: employees.length, sub: '245 active personnel' }, { l: 'Total Payroll', n: formatKwacha(totalPayroll), sub: 'November 2025' }, { l: 'Avg. Salary', n: formatKwacha(Math.round(totalPayroll / employees.length)), sub: 'Per employee' }, { l: 'Departments', n: Object.keys(byDept).length, sub: 'Operational units' }].map((s, i) => (<div key={i} className="p-4 rounded-lg bg-slate-50"><p className="text-xs text-slate-500">{s.l}</p><p className="text-xl font-bold text-slate-800 mt-1">{s.n}</p><p className="text-xs text-slate-500 mt-1">{s.sub}</p></div>))}</div></Card>
+      <Tabs tabs={tabs} active={active} onChange={setActive} />
+      <Card className="p-6"><h3 className="font-semibold text-slate-800 mb-4 capitalize">{tabs.find(t => t.id === active)?.label} � November 2025</h3><div className="overflow-x-auto"><table className="w-full text-sm"><THead><TR hover={false}><TH>Department</TH><TH>Employees</TH><TH className="text-right">Total Payroll</TH><TH className="text-right hidden md:table-cell">Average</TH><TH>Attendance</TH><TH className="hidden lg:table-cell">Status</TH></TR></THead><TBody>{Object.entries(byDept).sort((a, b) => b[1].count - a[1].count).map(([dept, data]) => (<TR key={dept}><TD><strong>{dept}</strong></TD><TD>{data.count} employees</TD><TD className="text-right font-mono font-semibold">{formatKwacha(data.total)}</TD><TD className="text-right font-mono hidden md:table-cell">{formatKwacha(Math.round(data.total / data.count))}</TD><TD><Badge color="green">{(94 + Math.floor(Math.random() * 5))}.{Math.floor(Math.random() * 9)}%</Badge></TD><TD className="hidden lg:table-cell"><Badge color={data.count > 20 ? 'green' : 'gold'}>{data.count > 20 ? 'Healthy' : 'Optimal'}</Badge></TD></TR>))}</TBody></table></div></Card>
+    </div>
+  );
+}
+
+/* ----------------- SETTINGS ----------------- */
+export function SettingsPage() {
+  const [tab, setTab] = useState('company');
+  const [saving, setSaving] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+  
+  // Role management state
+  const [roles, setRoles] = useState([
+    { id: 1, name: 'Administrator', users: 2, color: 'navy', perms: ['Full access to all modules', 'User management', 'System configuration'] },
+    { id: 2, name: 'HR Manager', users: 3, color: 'blue', perms: ['Employee management', 'Recruitment', 'Attendance review'] },
+    { id: 3, name: 'Accounts Officer', users: 2, color: 'gold', perms: ['Payroll processing', 'Report generation', 'Payslip generation'] },
+    { id: 4, name: 'Supervisor', users: 12, color: 'green', perms: ['Attendance marking', 'Leave approval', 'Department views'] },
+    { id: 5, name: 'Managing Director', users: 1, color: 'red', perms: ['Executive dashboards', 'Final approval', 'Strategic reports'] }
+  ]);
+  
+  const [showRoleModal, setShowRoleModal] = useState(false);
+  const [editingRole, setEditingRole] = useState<any>(null);
+  const [roleForm, setRoleForm] = useState({
+    name: '',
+    color: 'blue',
+    perms: ['', '', '']
+  });
+  
+  const colorOptions = [
+    { value: 'navy', label: 'Navy Blue', class: 'bg-[#081C3A]' },
+    { value: 'blue', label: 'Blue', class: 'bg-blue-500' },
+    { value: 'gold', label: 'Gold', class: 'bg-[#D4A017]' },
+    { value: 'green', label: 'Green', class: 'bg-green-500' },
+    { value: 'red', label: 'Red', class: 'bg-red-500' },
+    { value: 'purple', label: 'Purple', class: 'bg-purple-500' }
+  ];
+
+  // State for form values
+  const [companyForm, setCompanyForm] = useState({
+    companyName: 'Safeguard Security Services Ltd.',
+    registration: 'REG-123456-MW',
+    address: 'Area 11, Capital Hill, Lilongwe, Malawi',
+    phone: '+265 1 234 567',
+    email: 'info@safeguard.mw',
+    website: 'www.safeguard.mw',
+    taxId: 'MW-12345678',
+    pensionReg: 'NBS-123456'
+  });
+  
+  const [taxForm, setTaxForm] = useState({
+    taxRate: '30',
+    taxFreeThreshold: '50000',
+    taxAuthority: 'Malawi Revenue Authority',
+    filingFrequency: 'Monthly'
+  });
+  
+  const [pensionForm, setPensionForm] = useState({
+    employeeContribution: '5',
+    employerContribution: '5',
+    pensionFund: 'NBS Pension Fund',
+    remittanceCycle: 'Monthly'
+  });
+  
+  const [payrollForm, setPayrollForm] = useState({
+    defaultPayDate: 'Last working day',
+    currency: 'Malawi Kwacha (MK)',
+    allowanceRate: '10',
+    overtimeRate: '5',
+    workingDays: '22',
+    payPeriod: 'November 2025'
+  });
+  
+  const [systemSettings, setSystemSettings] = useState({
+    emailNotifications: true,
+    smsNotifications: false,
+    autoAttendanceSync: true,
+    twoFactorAuth: false,
+    auditLogging: true,
+    dataEncryption: true
+  });
+
+  const tabs = [
+    { id: 'company', label: 'Company' },
+    { id: 'tax', label: 'Tax Settings' },
+    { id: 'pension', label: 'Pension' },
+    { id: 'payroll', label: 'Payroll' },
+    { id: 'users', label: 'User Management' },
+    { id: 'roles', label: 'User Roles' },
+    { id: 'system', label: 'System' }
+  ];
+
+  // Save handlers
+  const handleSaveCompany = () => {
+    setSaving(true);
+    localStorage.setItem('companySettings', JSON.stringify(companyForm));
+    setTimeout(() => {
+      setSaving(false);
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+    }, 500);
+  };
+
+  const handleSaveTax = () => {
+    setSaving(true);
+    localStorage.setItem('taxSettings', JSON.stringify(taxForm));
+    setTimeout(() => {
+      setSaving(false);
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+    }, 500);
+  };
+
+  const handleSavePension = () => {
+    setSaving(true);
+    localStorage.setItem('pensionSettings', JSON.stringify(pensionForm));
+    setTimeout(() => {
+      setSaving(false);
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+    }, 500);
+  };
+
+  const handleSavePayroll = () => {
+    setSaving(true);
+    localStorage.setItem('payrollSettings', JSON.stringify(payrollForm));
+    setTimeout(() => {
+      setSaving(false);
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+    }, 500);
+  };
+
+  const handleCancel = () => {
+    const savedCompany = localStorage.getItem('companySettings');
+    if (savedCompany) {
+      setCompanyForm(JSON.parse(savedCompany));
+    } else {
+      setCompanyForm({
+        companyName: 'Safeguard Security Services Ltd.',
+        registration: 'REG-123456-MW',
+        address: 'Area 11, Capital Hill, Lilongwe, Malawi',
+        phone: '+265 1 234 567',
+        email: 'info@safeguard.mw',
+        website: 'www.safeguard.mw',
+        taxId: 'MW-12345678',
+        pensionReg: 'NBS-123456'
+      });
+    }
+  };
+
+  const handleToggleSetting = (index: number) => {
+    const settingKeys = ['emailNotifications', 'smsNotifications', 'autoAttendanceSync', 'twoFactorAuth', 'auditLogging', 'dataEncryption'];
+    const setting = settingKeys[index];
+    setSystemSettings(prev => ({
+      ...prev,
+      [setting]: !prev[setting as keyof typeof prev]
+    }));
+  };
+
+  // Role Management Functions
+  const handleNewRole = () => {
+    setEditingRole(null);
+    setRoleForm({
+      name: '',
+      color: 'blue',
+      perms: ['', '', '']
+    });
+    setShowRoleModal(true);
+  };
+
+  const handleEditRole = (role: any) => {
+    setEditingRole(role);
+    setRoleForm({
+      name: role.name,
+      color: role.color,
+      perms: [...role.perms, '', '', ''].slice(0, 3)
+    });
+    setShowRoleModal(true);
+  };
+
+  const handleDeleteRole = (roleId: number, roleName: string) => {
+    if (confirm(`Are you sure you want to delete the "${roleName}" role? This action cannot be undone.`)) {
+      setRoles(roles.filter(r => r.id !== roleId));
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+    }
+  };
+
+  const handleSaveRole = () => {
+    if (!roleForm.name.trim()) {
+      alert('Please enter a role name');
+      return;
+    }
+    
+    const newRole = {
+      id: editingRole ? editingRole.id : Date.now(),
+      name: roleForm.name,
+      users: editingRole ? editingRole.users : 0,
+      color: roleForm.color,
+      perms: roleForm.perms.filter(p => p.trim() !== '')
+    };
+    
+    if (editingRole) {
+      // Update existing role
+      setRoles(roles.map(r => r.id === editingRole.id ? newRole : r));
+    } else {
+      // Add new role
+      setRoles([...roles, newRole]);
+    }
+    
+    setShowRoleModal(false);
+    setShowSuccess(true);
+    setTimeout(() => setShowSuccess(false), 3000);
+  };
+
+  const updatePerm = (index: number, value: string) => {
+    const newPerms = [...roleForm.perms];
+    newPerms[index] = value;
+    setRoleForm({ ...roleForm, perms: newPerms });
+  };
+
+  // Load saved settings on mount
+  useEffect(() => {
+    const savedCompany = localStorage.getItem('companySettings');
+    if (savedCompany) setCompanyForm(JSON.parse(savedCompany));
+    const savedTax = localStorage.getItem('taxSettings');
+    if (savedTax) setTaxForm(JSON.parse(savedTax));
+    const savedPension = localStorage.getItem('pensionSettings');
+    if (savedPension) setPensionForm(JSON.parse(savedPension));
+    const savedPayroll = localStorage.getItem('payrollSettings');
+    if (savedPayroll) setPayrollForm(JSON.parse(savedPayroll));
+    const savedRoles = localStorage.getItem('roles');
+    if (savedRoles) setRoles(JSON.parse(savedRoles));
+  }, []);
+
+  // Save roles to localStorage when changed
+  useEffect(() => {
+    localStorage.setItem('roles', JSON.stringify(roles));
+  }, [roles]);
+
+  
+
+  // Role Modal Component
+  const RoleModal = () => (
+  <Modal open={showRoleModal} onClose={() => setShowRoleModal(false)} title={editingRole ? 'Edit Role' : 'Create New Role'} size="lg">
+    <div className="space-y-4">
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1.5">Role Name *</label>
+        <input
+          type="text"
+          value={roleForm.name}
+          onChange={(e) => {
+            const newValue = e.target.value;
+            setRoleForm(prev => ({ ...prev, name: newValue }));
+          }}
+          placeholder="e.g., Regional Manager, Team Lead"
+          className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A]"
+        />
+      </div>
+      
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1.5">Role Color</label>
+        <div className="flex gap-2 flex-wrap">
+          {colorOptions.map(color => (
+            <button
+              key={color.value}
+              type="button"
+              onClick={() => setRoleForm(prev => ({ ...prev, color: color.value }))}
+              className={`w-10 h-10 rounded-lg ${color.class} ${roleForm.color === color.value ? 'ring-2 ring-offset-2 ring-[#081C3A]' : ''}`}
+              title={color.label}
+            />
+          ))}
+        </div>
+        <p className="text-xs text-slate-400 mt-1">
+          Color meanings: Navy=Admin, Blue=Manager, Gold=Finance, Green=Supervisor, Red=Executive, Purple=Special
+        </p>
+      </div>
+      
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1.5">Permissions</label>
+        <div className="space-y-2">
+          {[0, 1, 2].map((idx) => (
+            <input
+              key={idx}
+              type="text"
+              value={roleForm.perms[idx] || ''}
+              onChange={(e) => {
+                const newPerms = [...roleForm.perms];
+                newPerms[idx] = e.target.value;
+                setRoleForm(prev => ({ ...prev, perms: newPerms }));
+              }}
+              placeholder={`Permission ${idx + 1} (e.g., View reports, Edit users)`}
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A]"
+            />
+          ))}
+        </div>
+        <p className="text-xs text-slate-400 mt-1">Leave empty to add fewer permissions</p>
+      </div>
+    </div>
+    <div className="flex justify-end gap-2 mt-6">
+      <Button variant="outline" onClick={() => setShowRoleModal(false)}>Cancel</Button>
+      <Button variant="secondary" onClick={handleSaveRole}>
+        <CheckCircle size={14} className="mr-1" /> {editingRole ? 'Update Role' : 'Create Role'}
+      </Button>
+    </div>
+  </Modal>
+);
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader title="System Settings" subtitle="Configure company preferences and policies" />
+      
+      {showSuccess && (
+        <div className="fixed top-4 right-4 z-50 bg-emerald-500 text-white px-4 py-2 rounded-lg shadow-lg text-sm animate-fade-in">
+          Settings saved successfully!
+        </div>
+      )}
+      
+      <Tabs tabs={tabs} active={tab} onChange={setTab} />
+      
+      {tab === 'company' && (
+        <Card className="p-6">
+          <h3 className="font-semibold text-slate-800 mb-4">Company Information</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input label="Company Name" value={companyForm.companyName} onChange={(e: any) => setCompanyForm({...companyForm, companyName: e.target.value})} />
+            <Input label="Company Registration" value={companyForm.registration} onChange={(e: any) => setCompanyForm({...companyForm, registration: e.target.value})} />
+            <Input label="Address" value={companyForm.address} onChange={(e: any) => setCompanyForm({...companyForm, address: e.target.value})} />
+            <Input label="Phone" value={companyForm.phone} onChange={(e: any) => setCompanyForm({...companyForm, phone: e.target.value})} />
+            <Input label="Email" value={companyForm.email} onChange={(e: any) => setCompanyForm({...companyForm, email: e.target.value})} />
+            <Input label="Website" value={companyForm.website} onChange={(e: any) => setCompanyForm({...companyForm, website: e.target.value})} />
+            <Input label="Tax ID (TPIN)" value={companyForm.taxId} onChange={(e: any) => setCompanyForm({...companyForm, taxId: e.target.value})} />
+            <Input label="Pension Registration" value={companyForm.pensionReg} onChange={(e: any) => setCompanyForm({...companyForm, pensionReg: e.target.value})} />
+          </div>
+          <div className="flex items-center justify-end gap-2 mt-6">
+            <Button variant="outline" onClick={handleCancel}>Cancel</Button>
+            <Button variant="secondary" onClick={handleSaveCompany} disabled={saving}>
+              {saving ? 'Saving...' : <><CheckCircle size={14} className="mr-1" /> Save Changes</>}
+            </Button>
+          </div>
+        </Card>
+      )}
+      
+      {tab === 'tax' && (
+        <Card className="p-6">
+          <h3 className="font-semibold text-slate-800 mb-4">Tax Settings (PAYE)</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input label="PAYE Tax Rate (%)" value={taxForm.taxRate} onChange={(e: any) => setTaxForm({...taxForm, taxRate: e.target.value})} />
+            <Input label="Tax Free Threshold (MK)" value={taxForm.taxFreeThreshold} onChange={(e: any) => setTaxForm({...taxForm, taxFreeThreshold: e.target.value})} />
+            <Input label="Tax Authority" value={taxForm.taxAuthority} onChange={(e: any) => setTaxForm({...taxForm, taxAuthority: e.target.value})} />
+            <Input label="Filing Frequency" value={taxForm.filingFrequency} onChange={(e: any) => setTaxForm({...taxForm, filingFrequency: e.target.value})} />
+          </div>
+          <div className="mt-6 p-4 rounded-lg bg-[#FFF9E5] text-sm">
+            <Percent size={16} className="inline mr-2 text-[#D4A017]" />
+            Current policy: Flat {taxForm.taxRate}% PAYE on gross income above MK {parseInt(taxForm.taxFreeThreshold).toLocaleString()} threshold. Tax is deducted at source.
+          </div>
+          <div className="flex items-center justify-end gap-2 mt-6">
+            <Button variant="outline" onClick={handleCancel}>Cancel</Button>
+            <Button variant="secondary" onClick={handleSaveTax} disabled={saving}>
+              {saving ? 'Saving...' : <><CheckCircle size={14} className="mr-1" /> Save Changes</>}
+            </Button>
+          </div>
+        </Card>
+      )}
+      
+      {tab === 'pension' && (
+        <Card className="p-6">
+          <h3 className="font-semibold text-slate-800 mb-4">Pension Contribution Settings</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input label="Employee Contribution (%)" value={pensionForm.employeeContribution} onChange={(e: any) => setPensionForm({...pensionForm, employeeContribution: e.target.value})} />
+            <Input label="Employer Contribution (%)" value={pensionForm.employerContribution} onChange={(e: any) => setPensionForm({...pensionForm, employerContribution: e.target.value})} />
+            <Input label="Pension Fund" value={pensionForm.pensionFund} onChange={(e: any) => setPensionForm({...pensionForm, pensionFund: e.target.value})} />
+            <Input label="Remittance Cycle" value={pensionForm.remittanceCycle} onChange={(e: any) => setPensionForm({...pensionForm, remittanceCycle: e.target.value})} />
+          </div>
+          <div className="flex items-center justify-end gap-2 mt-6">
+            <Button variant="outline" onClick={handleCancel}>Cancel</Button>
+            <Button variant="secondary" onClick={handleSavePension} disabled={saving}>
+              {saving ? 'Saving...' : <><CheckCircle size={14} className="mr-1" /> Save Changes</>}
+            </Button>
+          </div>
+        </Card>
+      )}
+      
+      {tab === 'payroll' && (
+        <Card className="p-6">
+          <h3 className="font-semibold text-slate-800 mb-4">Payroll Configuration</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input label="Default Pay Date" value={payrollForm.defaultPayDate} onChange={(e: any) => setPayrollForm({...payrollForm, defaultPayDate: e.target.value})} />
+            <Input label="Payroll Currency" value={payrollForm.currency} onChange={(e: any) => setPayrollForm({...payrollForm, currency: e.target.value})} />
+            <Input label="Allowance Rate (%)" value={payrollForm.allowanceRate} onChange={(e: any) => setPayrollForm({...payrollForm, allowanceRate: e.target.value})} />
+            <Input label="Overtime Rate (%)" value={payrollForm.overtimeRate} onChange={(e: any) => setPayrollForm({...payrollForm, overtimeRate: e.target.value})} />
+            <Input label="Working Days" value={payrollForm.workingDays} onChange={(e: any) => setPayrollForm({...payrollForm, workingDays: e.target.value})} />
+            <Input label="Pay Period" value={payrollForm.payPeriod} onChange={(e: any) => setPayrollForm({...payrollForm, payPeriod: e.target.value})} />
+          </div>
+          <div className="mt-6 p-4 rounded-lg bg-[#E8EDF5] text-sm flex items-start gap-3">
+            <CreditCard size={18} className="text-[#081C3A] shrink-0 mt-0.5" />
+            <div><strong>Bank Integration:</strong> National Bank of Malawi � NBS Bank � FDH Bank</div>
+          </div>
+          <div className="flex items-center justify-end gap-2 mt-6">
+            <Button variant="outline" onClick={handleCancel}>Cancel</Button>
+            <Button variant="secondary" onClick={handleSavePayroll} disabled={saving}>
+              {saving ? 'Saving...' : <><CheckCircle size={14} className="mr-1" /> Save Changes</>}
+            </Button>
+          </div>
+        </Card>
+      )}
+      
+      {tab === 'users' && <UserManagement />}
+      
+      {tab === 'roles' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold text-slate-800">User Roles & Permissions</h3>
+              <p className="text-xs text-slate-500">Manage access control and system privileges</p>
+            </div>
+            <Button variant="secondary" onClick={handleNewRole}><Plus size={14} /> New Role</Button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {roles.map((r, i) => (
+              <Card key={i} className="p-5">
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <h4 className="font-bold text-slate-800">{r.name}</h4>
+                    <p className="text-xs text-slate-500">{r.users} active users</p>
+                  </div>
+                  <Badge color={r.color as any}>{r.name === 'Administrator' ? 'Admin' : 'Standard'}</Badge>
+                </div>
+                <ul className="text-xs text-slate-600 space-y-1.5 mb-4">
+                  {r.perms.map((p, j) => <li key={j} className="flex items-start gap-2"><CheckCircle size={12} className="text-emerald-600 shrink-0 mt-0.5" />{p}</li>)}
+                </ul>
+                <div className="flex gap-2 pt-3 border-t border-slate-100">
+                  <Button variant="outline" className="text-xs py-1.5 flex-1" onClick={() => handleEditRole(r)}>
+                    <Edit2 size={12} /> Edit
+                  </Button>
+                  <Button variant="ghost" className="text-xs py-1.5 text-red-600" onClick={() => handleDeleteRole(r.id, r.name)}>
+                    <Trash2 size={12} /> Delete
+                  </Button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+      
+      {tab === 'system' && (
+        <Card className="p-6">
+          <h3 className="font-semibold text-slate-800 mb-4">System Preferences</h3>
+          <div className="space-y-3">
+            {['Email notifications', 'SMS notifications', 'Auto-attendance sync', 'Two-factor authentication', 'Audit logging', 'Data encryption'].map((label, i) => (
+              <div key={i} className="flex items-start justify-between p-3 rounded-lg hover:bg-slate-50">
+                <div>
+                  <p className="text-sm font-medium text-slate-800">{label}</p>
+                  <p className="text-xs text-slate-500">System setting</p>
+                </div>
+                <button 
+                  onClick={() => handleToggleSetting(i)}
+                  className={`w-11 h-6 rounded-full relative transition-colors ${Object.values(systemSettings)[i] ? 'bg-[#D4A017]' : 'bg-slate-300'}`}
+                >
+                  <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${Object.values(systemSettings)[i] ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+      
+      <RoleModal />
+    </div>
+  );
+}
+
+/* ----------------- SECURITY PERSONNEL ----------------- */
+export function SecurityPage() {
+  const employees = generateEmployees(245).slice(0, 60);
+  const [search, setSearch] = useState('');
+  const filtered = employees.filter(e => e.position.toLowerCase().includes('guard') || e.position.toLowerCase().includes('security') || e.position.toLowerCase().includes('officer') || e.position.toLowerCase().includes('patrol'));
+  const sites = ['Reserve Bank of Malawi', 'Illovo Sugar HQ', 'NBS Bank Towers', 'Standard Bank Plaza', 'Old Mutual Centre', 'Mzuzu Coffee Estates', 'Castel Brewery', 'Sunbird Capital Hotel'];
+  const shifts = ['Morning (06-14)', 'Afternoon (14-22)', 'Night (22-06)', '24hr Rotation'];
+  const supervisors = ['William Banda', 'Agnes Phiri', 'John Mwanza', 'Felix Soko'];
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader title="Security Personnel" subtitle="Dedicated module for guard deployment, shifts, and licensing" actions={<><Button variant="outline"><MapPin size={16} /> Deployments</Button><Button variant="secondary"><Shield size={16} /> Add Guard</Button></>} />
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">{[{ l: 'Active Guards', n: 198, sub: 'On duty now' }, { l: 'Deployment Sites', n: 47, sub: 'Across Malawi' }, { l: 'Licenses Valid', n: 195, sub: '3 expiring soon' }, { l: 'Uniforms Issued', n: 198, sub: 'Full kit provided' }].map((s, i) => (<Card key={i} className="p-5"><p className="text-xs text-slate-500">{s.l}</p><p className="text-2xl font-bold text-slate-800 mt-1">{s.n}</p><p className="text-xs text-slate-500 mt-1">{s.sub}</p></Card>))}</div>
+      <Card className="p-4"><div className="relative"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search guards..." className="w-full pl-10 pr-3 py-2.5 text-sm border border-slate-200 rounded-lg" /></div></Card>
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white"><div className="overflow-x-auto"><table className="w-full text-sm"><THead><TR hover={false}><TH>Guard</TH><TH>Guard ID</TH><TH className="hidden md:table-cell">Site</TH><TH className="hidden lg:table-cell">Supervisor</TH><TH className="hidden md:table-cell">Shift</TH><TH>License</TH><TH className="hidden md:table-cell">Uniform</TH><TH>Status</TH></TR></THead><TBody>{filtered.slice(0, 25).map((emp, i) => (<TR key={emp.id}><TD><div className="flex items-center gap-3"><div className="w-8 h-8 rounded-lg bg-[#081C3A] text-white flex items-center justify-center"><Shield size={14} /></div><div><p className="text-sm font-medium">{emp.fullName}</p><p className="text-xs text-slate-500">{emp.position}</p></div></div></TD><TD className="font-mono text-xs">{emp.employeeNumber}</TD><TD className="hidden md:table-cell text-xs">{sites[i % sites.length]}</TD><TD className="hidden lg:table-cell text-xs">{supervisors[i % supervisors.length]}</TD><TD className="hidden md:table-cell text-xs">{shifts[i % shifts.length]}</TD><TD><Badge color={i % 20 === 0 ? 'yellow' : 'green'}>{i % 20 === 0 ? 'Expiring' : 'Valid'}</Badge></TD><TD className="hidden md:table-cell"><Badge color="blue">Issued</Badge></TD><TD><Badge color={emp.status === 'Active' ? 'green' : 'yellow'}>{emp.status}</Badge></TD></TR>))}</TBody></table></div></div>
+    </div>
+  );
+}
+
+/* ----------------- FUTURE FEATURES ----------------- */
+export function FeaturesPage() {
+  const features = [{ title: 'Guard Tracking System', desc: 'Real-time GPS tracking', icon: Map, color: 'navy' }, { title: 'Client Portal', desc: 'Self-service portal', icon: Building2, color: 'gold' }, { title: 'Incident Reporting', desc: 'Incident logging', icon: ClipboardList, color: 'red' }, { title: 'Vehicle Tracking', desc: 'Fleet management', icon: Car, color: 'blue' }, { title: 'AI Assistant', desc: 'Smart HR assistant', icon: Bot, color: 'purple' }, { title: 'CCTV Integration', desc: 'Central monitoring', icon: Camera, color: 'emerald' }];
+  const colorMap: Record<string, string> = { navy: 'from-[#081C3A] to-[#1a2f5c]', gold: 'from-[#8B6F0F] to-[#D4A017]', red: 'from-[#7F1D1D] to-[#EF4444]', blue: 'from-[#1E40AF] to-[#3B82F6]', purple: 'from-[#5B21B6] to-[#8B5CF6]', emerald: 'from-[#065F46] to-[#10B981]' };
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader title="Future Features Roadmap" subtitle="Upcoming enhancements" />
+      <Card className="p-6 bg-gradient-to-br from-[#081C3A] to-[#1a2f5c] text-white border-0"><div className="flex items-start gap-4"><div className="w-14 h-14 rounded-2xl bg-[#D4A017] flex items-center justify-center"><Sparkles size={28} className="text-[#081C3A]" /></div><div><h2 className="text-2xl font-bold mb-2">Scaling to 1,000+ Employees</h2><p className="text-white/80">Enterprise-ready architecture for future growth</p></div></div></Card>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">{features.map((f, i) => { const Icon = f.icon; return (<Card key={i} className="overflow-hidden"><div className={`h-2 bg-gradient-to-r ${colorMap[f.color]}`} /><div className="p-6"><div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${colorMap[f.color]} flex items-center justify-center text-white mb-4`}><Icon size={22} /></div><h3 className="text-lg font-bold text-slate-800 mb-2">{f.title}</h3><p className="text-sm text-slate-600 mb-3">{f.desc}</p><Badge color="gold">Coming Soon</Badge></div></Card>); })}</div>
+    </div>
+  );
+}
