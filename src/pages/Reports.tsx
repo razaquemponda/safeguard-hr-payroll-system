@@ -6,6 +6,8 @@ import { supabase } from '../lib/supabase';
 import { getAvailableMonths, getCurrentMonth, isFutureMonth } from '../utils/dateUtils';
 import { MonthSelector } from '../components/MonthSelector';
 import { EmptyState } from '../components/EmptyState';
+// ===== NEW: Import sanitization =====
+import { sanitizeInput } from '../utils/securityHeaders';
 
 type ReportType = 'employee' | 'payroll' | 'attendance' | 'recruitment' | 'department' | 'company' | 'workstation';
 
@@ -123,7 +125,9 @@ export function ReportsPage() {
       alert('Cannot view future months. Please select a current or past month.');
       return;
     }
-    setSelectedMonth(newMonth);
+    // ===== NEW: Sanitize month input =====
+    const safeMonth = sanitizeInput(newMonth);
+    setSelectedMonth(safeMonth);
     setLoading(true);
     await fetchData();
   };
@@ -195,7 +199,8 @@ export function ReportsPage() {
     const companyMap: Record<string, CompanyStats> = {};
     
     employees.forEach(emp => {
-      const companyName = emp.company || 'Unassigned';
+      // ===== NEW: Sanitize company name =====
+      const companyName = emp.company ? sanitizeInput(emp.company) : 'Unassigned';
       if (!companyMap[companyName]) {
         companyMap[companyName] = {
           name: companyName,
@@ -215,7 +220,8 @@ export function ReportsPage() {
       companyMap[companyName].totalPayroll += payroll?.net_pay || emp.basic_salary || 0;
       
       // Track workstations per company
-      const workstationName = emp.workstation || 'Unassigned';
+      // ===== NEW: Sanitize workstation name =====
+      const workstationName = emp.workstation ? sanitizeInput(emp.workstation) : 'Unassigned';
       if (!companyMap[companyName].workstations[workstationName]) {
         companyMap[companyName].workstations[workstationName] = {
           name: workstationName,
@@ -243,8 +249,10 @@ export function ReportsPage() {
     const workstationMap: Record<string, { count: number; activeCount: number; payrollTotal: number; companies: Record<string, number> }> = {};
     
     employees.forEach(emp => {
-      const workstationName = emp.workstation || 'Unassigned';
-      const companyName = emp.company || 'Unassigned';
+      // ===== NEW: Sanitize workstation name =====
+      const workstationName = emp.workstation ? sanitizeInput(emp.workstation) : 'Unassigned';
+      // ===== NEW: Sanitize company name =====
+      const companyName = emp.company ? sanitizeInput(emp.company) : 'Unassigned';
       
       if (!workstationMap[workstationName]) {
         workstationMap[workstationName] = {
@@ -303,13 +311,14 @@ export function ReportsPage() {
           title: 'Employee Report',
           headers: ['Name', 'Employee ID', 'Company', 'Workstation', 'Position', 'Department', 'Status', 'Salary'],
           rows: employees.map(emp => [
-            emp.full_name,
-            emp.employee_number,
-            emp.company || '-',
-            emp.workstation || '-',
-            emp.position,
-            emp.department || '-',
-            emp.status,
+            // ===== NEW: Sanitize all employee data for display =====
+            sanitizeInput(emp.full_name),
+            sanitizeInput(emp.employee_number),
+            sanitizeInput(emp.company || '-'),
+            sanitizeInput(emp.workstation || '-'),
+            sanitizeInput(emp.position),
+            sanitizeInput(emp.department || '-'),
+            sanitizeInput(emp.status),
             formatKwacha(emp.basic_salary || 0)
           ])
         };
@@ -320,9 +329,9 @@ export function ReportsPage() {
           rows: employees.map(emp => {
             const payroll = payrollRecords.find(p => p.employee_id === emp.id);
             return [
-              emp.full_name,
-              emp.position,
-              emp.department || '-',
+              sanitizeInput(emp.full_name),
+              sanitizeInput(emp.position),
+              sanitizeInput(emp.department || '-'),
               formatKwacha(payroll?.gross_pay || emp.basic_salary || 0),
               formatKwacha(payroll?.paye || 0),
               formatKwacha(payroll?.pension || 0),
@@ -335,11 +344,11 @@ export function ReportsPage() {
           title: 'Attendance Report',
           headers: ['Name', 'Position', 'Department', 'Attendance Rate', 'Status'],
           rows: employees.map(emp => [
-            emp.full_name,
-            emp.position,
-            emp.department || '-',
+            sanitizeInput(emp.full_name),
+            sanitizeInput(emp.position),
+            sanitizeInput(emp.department || '-'),
             `${(85 + Math.random() * 10).toFixed(1)}%`,
-            emp.status
+            sanitizeInput(emp.status)
           ])
         };
       case 'recruitment':
@@ -347,11 +356,11 @@ export function ReportsPage() {
           title: 'Recruitment Report',
           headers: ['Applicant Name', 'Position', 'Qualification', 'Status', 'Application Date'],
           rows: applicants.map(app => [
-            app.name,
-            app.position,
-            app.qualification || '-',
-            app.interview_status,
-            app.application_date
+            sanitizeInput(app.name),
+            sanitizeInput(app.position),
+            sanitizeInput(app.qualification || '-'),
+            sanitizeInput(app.interview_status),
+            sanitizeInput(app.application_date)
           ])
         };
       case 'company':
@@ -359,11 +368,11 @@ export function ReportsPage() {
           title: 'Company & Workstation Report',
           headers: ['Company', 'Total Employees', 'Active', 'Total Payroll', 'Workstations Breakdown'],
           rows: companyData.map(company => [
-            company.name,
+            sanitizeInput(company.name),
             company.totalEmployees,
             company.activeEmployees,
             formatKwacha(company.totalPayroll),
-            company.workstations.map(w => `${w.name}: ${w.employeeCount}`).join(' | ')
+            company.workstations.map(w => `${sanitizeInput(w.name)}: ${w.employeeCount}`).join(' | ')
           ])
         };
       case 'workstation':
@@ -371,11 +380,11 @@ export function ReportsPage() {
           title: 'Workstation Analysis Report',
           headers: ['Workstation', 'Total Employees', 'Active', 'Total Payroll', 'Companies'],
           rows: workstationData.map(ws => [
-            ws.name,
+            sanitizeInput(ws.name),
             ws.totalEmployees,
             ws.activeEmployees,
             formatKwacha(ws.totalPayroll),
-            Object.entries(ws.companies).map(([company, count]) => `${company}: ${count}`).join(' | ')
+            Object.entries(ws.companies).map(([company, count]) => `${sanitizeInput(company)}: ${count}`).join(' | ')
           ])
         };
       default:
@@ -383,7 +392,7 @@ export function ReportsPage() {
           title: 'Department Report',
           headers: ['Department', 'Employees', 'Total Payroll', 'Average Salary', 'Attendance'],
           rows: departmentData.map(dept => [
-            dept.name,
+            sanitizeInput(dept.name),
             `${dept.employees} employees`,
             formatKwacha(dept.totalPayroll),
             formatKwacha(dept.average),

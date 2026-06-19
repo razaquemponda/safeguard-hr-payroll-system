@@ -11,6 +11,7 @@ import {
   Shield,
   ChevronRight,
   DollarSign,
+  Calculator,
 } from "lucide-react";
 import { cn } from "../utils/cn";
 import { supabase } from "../lib/supabase";
@@ -24,6 +25,7 @@ export type NavKey =
   | "payroll"
   | "payslips"
   | "payments"
+  | "terminal-dues"   // ← ADD THIS LINE
   | "reports"
   | "settings"
   | "security"
@@ -34,6 +36,7 @@ export type NavKey =
 export const allNavItems: { id: NavKey; label: string; icon: any }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "employees", label: "Employees", icon: Users },
+  { id: "terminal-dues", label: "Terminal Dues", icon: Calculator },
   { id: "recruitment", label: "Recruitment", icon: ClipboardList },
   { id: "attendance", label: "Attendance", icon: CalendarCheck },
   { id: "payroll", label: "Payroll", icon: Wallet },
@@ -53,6 +56,7 @@ const roleMenuItems: Record<number, NavKey[]> = {
     "payroll",
     "payslips",
     "payments",
+    "terminal-dues",
     "reports",
     "settings",
     "security",
@@ -65,6 +69,7 @@ const roleMenuItems: Record<number, NavKey[]> = {
     "recruitment",
     "attendance",
     "payments",
+    "terminal-dues",
     "reports",
     "security",
   ],
@@ -314,10 +319,10 @@ export function BottomNav({
   }, []);
 
   const roleBottomItems: Record<number, NavKey[]> = {
-    1: ["dashboard", "employees", "payroll", "payments", "attendance", "settings"],
-    2: ["dashboard", "employees", "attendance", "reports"],
-    3: ["dashboard", "attendance", "security"],
-    4: ["dashboard", "payslips"],
+    1: ["dashboard", "employees", "payroll", "payments", "terminal-dues", "attendance", "settings"],
+    2: ["dashboard", "employees", "terminal-dues", "attendance", "reports"],
+    3: ["dashboard", "employees", "attendance","terminal-dues", "reports"],
+    4: ["dashboard", "employees", "payments", "payslips", "reports"],
   };
 
   const allowedBottomMenus =
@@ -328,6 +333,7 @@ export function BottomNav({
     { id: "employees", label: "Employees", icon: Users },
     { id: "payroll", label: "Payroll", icon: Wallet },
     { id: "payments", label: "Payments", icon: DollarSign },
+    { id: "terminal-dues", label: "Terminal Dues", icon: Calculator },  // ← ADD THIS
     { id: "attendance", label: "Attendance", icon: CalendarCheck },
     { id: "settings", label: "Settings", icon: Settings },
     { id: "reports", label: "Reports", icon: BarChart3 },

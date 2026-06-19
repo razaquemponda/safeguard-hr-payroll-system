@@ -1,11 +1,13 @@
 ﻿import { useState, useEffect } from 'react';
-import { Search, Calendar, CheckCircle2, XCircle, Clock, Plane, FileText, RefreshCw } from 'lucide-react';
+import { Search, Calendar, CheckCircle2, XCircle, Clock, Plane, FileText, RefreshCw, Scissors, Sparkles } from 'lucide-react';
 import { Card, Button, Badge, PageHeader, THead, TBody, TR, TH, TD, Modal } from '../components/ui';
 import { supabase } from '../lib/supabase';
 import { getAvailableMonths, getCurrentMonth, getDateRangeFromMonth, isFutureMonth } from '../utils/dateUtils';
 import { MonthSelector } from '../components/MonthSelector';
 import { EmptyState } from '../components/EmptyState';
 import { CopyFromPreviousModal } from '../components/CopyFromPreviousModal';
+// ===== NEW: Import sanitization =====
+import { sanitizeInput } from '../utils/securityHeaders';
 
 const statusColors: Record<string, string> = {
   P: 'bg-emerald-500', 
@@ -43,6 +45,15 @@ interface AttendanceRecord {
   status: string;
 }
 
+// NEW: Deduction settings interface
+interface DeductionSettings {
+  absentDeduction: number;
+  lateDeduction: number;
+  lectureDeduction: number;
+  lectureFullMonthDeduction: number;
+  appearanceDeduction: number;
+}
+
 export function AttendancePage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
@@ -55,6 +66,15 @@ export function AttendancePage() {
   const [hasData, setHasData] = useState(true);
   const [userProfile, setUserProfile] = useState<any>(null);
   const availableMonths = getAvailableMonths();
+  
+  // NEW: Deduction settings state with defaults
+  const [deductionSettings, setDeductionSettings] = useState<DeductionSettings>({
+    absentDeduction: 4200,
+    lateDeduction: 4200,
+    lectureDeduction: 3000,
+    lectureFullMonthDeduction: 15000,
+    appearanceDeduction: 2000
+  });
 
   // Fetch user profile for region access
   useEffect(() => {
@@ -73,7 +93,34 @@ export function AttendancePage() {
       }
     };
     fetchUserProfile();
+    
+    // NEW: Load deduction settings from localStorage or database
+    loadDeductionSettings();
   }, []);
+
+  // NEW: Load deduction settings
+  const loadDeductionSettings = async () => {
+    try {
+      // Try to load from localStorage first
+      const saved = localStorage.getItem('attendanceDeductionSettings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setDeductionSettings(parsed);
+      }
+    } catch (err) {
+      console.error('Error loading deduction settings:', err);
+    }
+  };
+
+  // NEW: Save deduction settings
+  const saveDeductionSettings = async (settings: DeductionSettings) => {
+    try {
+      localStorage.setItem('attendanceDeductionSettings', JSON.stringify(settings));
+      setDeductionSettings(settings);
+    } catch (err) {
+      console.error('Error saving deduction settings:', err);
+    }
+  };
 
   function getDatesForMonth(monthYear: string) {
     const { startDate, endDate, daysInMonth } = getDateRangeFromMonth(monthYear);
@@ -95,7 +142,6 @@ export function AttendancePage() {
       .gte('date', dates[0])
       .lte('date', dates[dates.length - 1]);
     
-    // Apply region filter
     if (!userProfile?.is_super_admin && userProfile?.region_id) {
       const { data: regionEmployees } = await supabase
         .from('employees')
@@ -145,7 +191,6 @@ export function AttendancePage() {
       .gte('date', sourceDates[0])
       .lte('date', sourceDates[sourceDates.length - 1]);
     
-    // Apply region filter for source data
     if (!userProfile?.is_super_admin && userProfile?.region_id) {
       const { data: regionEmployees } = await supabase
         .from('employees')
@@ -192,12 +237,10 @@ export function AttendancePage() {
     setLoading(true);
     setError(null);
     try {
-      // Build employees query with region filter
       let employeesQuery = supabase
         .from('employees')
         .select('id, employee_number, full_name, position, department, status, region_id');
       
-      // Apply region filter for employees based on logged-in user
       if (!userProfile?.is_super_admin && userProfile?.region_id) {
         console.log('Filtering employees by region:', userProfile.region_id);
         employeesQuery = employeesQuery.eq('region_id', userProfile.region_id);
@@ -244,7 +287,6 @@ export function AttendancePage() {
   };
 
   const updateAttendance = async (employeeId: string, date: string, currentStatus: string) => {
-    // Check if user has permission for this employee
     const employee = employees.find(e => e.id === employeeId);
     if (!userProfile?.is_super_admin && employee?.region_id !== userProfile?.region_id) {
       alert('You can only edit attendance for employees in your region');
@@ -295,6 +337,70 @@ export function AttendancePage() {
     return { ...counts, total };
   };
 
+  // NEW: Calculate deductions for an employee
+  const calculateEmployeeDeductions = (employeeId: string) => {
+    const employeeAttendance = attendance.filter(a => a.employee_id === employeeId);
+    const counts = { A: 0, L: 0 };
+    let lectureMissedCount = 0;
+    
+    employeeAttendance.forEach(record => {
+      if (record.status === 'A') counts.A++;
+      if (record.status === 'L') counts.L++;
+    });
+    
+    // Count lectures missed (Wednesdays and Thursdays)
+    const dates = getDatesForMonth(selectedMonth);
+    dates.forEach(date => {
+      const dateObj = new Date(date);
+      const dayOfWeek = dateObj.getDay(); // 3 = Wednesday, 4 = Thursday
+      if (dayOfWeek === 3 || dayOfWeek === 4) {
+        const status = getAttendanceStatus(employeeId, date);
+        if (status === 'A') {
+          lectureMissedCount++;
+        }
+      }
+    });
+    
+    // Calculate deductions
+    const absentLateCount = counts.A + counts.L;
+    const absentDeduction = counts.A * deductionSettings.absentDeduction;
+    const lateDeduction = counts.L * deductionSettings.lateDeduction;
+    const attendanceDeduction = absentDeduction + lateDeduction;
+    
+    // Lecture deductions
+    let lectureDeduction = 0;
+    if (lectureMissedCount > 0) {
+      // Check if missed all lectures in month
+      const totalLectures = dates.filter(d => {
+        const dayOfWeek = new Date(d).getDay();
+        return dayOfWeek === 3 || dayOfWeek === 4;
+      }).length;
+      
+      if (lectureMissedCount === totalLectures && totalLectures > 0) {
+        lectureDeduction = deductionSettings.lectureFullMonthDeduction;
+      } else {
+        lectureDeduction = lectureMissedCount * deductionSettings.lectureDeduction;
+      }
+    }
+    
+    // Appearance deduction (deducted monthly if employee is active)
+    const appearanceDeduction = deductionSettings.appearanceDeduction;
+    
+    const totalDeductions = attendanceDeduction + lectureDeduction + appearanceDeduction;
+    
+    return {
+      absentDays: counts.A,
+      lateDays: counts.L,
+      absentDeduction,
+      lateDeduction,
+      attendanceDeduction,
+      lectureMissedCount,
+      lectureDeduction,
+      appearanceDeduction,
+      totalDeductions
+    };
+  };
+
   const calculateMetrics = () => {
     let totalDays = 0;
     let presentDays = 0;
@@ -317,23 +423,28 @@ export function AttendancePage() {
 
   const metrics = calculateMetrics();
   const dates = getDatesForMonth(selectedMonth);
-  const filteredEmployees = employees.filter(e =>
-    e.full_name?.toLowerCase().includes(search.toLowerCase()) ||
-    e.employee_number?.toLowerCase().includes(search.toLowerCase())
-  );
+  
+  // ===== UPDATED: Filter employees with sanitized search =====
+  const filteredEmployees = employees.filter(e => {
+    const safeSearch = sanitizeInput(search).toLowerCase();
+    return e.full_name?.toLowerCase().includes(safeSearch) ||
+           e.employee_number?.toLowerCase().includes(safeSearch);
+  });
 
   const exportReport = () => {
     let csv = 'Employee,Position,Department,';
     dates.forEach((_, i) => { csv += `Day ${i + 1},`; });
-    csv += 'Present,Absent,Late,Leave,Sick\n';
+    csv += 'Present,Absent,Late,Leave,Sick,Absent Deduction,Late Deduction,Lecture Deduction,Appearance Deduction,Total Deductions\n';
     filteredEmployees.forEach(emp => {
       const stats = getEmployeeStats(emp.id);
+      const deductions = calculateEmployeeDeductions(emp.id);
       csv += `"${emp.full_name}","${emp.position}","${emp.department}",`;
       dates.forEach(date => {
         const status = getAttendanceStatus(emp.id, date);
         csv += `${status},`;
       });
-      csv += `${stats.P},${stats.A},${stats.L},${stats.LV},${stats.SL}\n`;
+      csv += `${stats.P},${stats.A},${stats.L},${stats.LV},${stats.SL},`;
+      csv += `${deductions.absentDeduction},${deductions.lateDeduction},${deductions.lectureDeduction},${deductions.appearanceDeduction},${deductions.totalDeductions}\n`;
     });
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -356,24 +467,329 @@ export function AttendancePage() {
     return <div className="text-center py-12 text-red-500">{error}</div>;
   }
 
+  // NEW: Enhanced Employee Modal with editable deductions
   const EmployeeModal = () => {
     if (!selectedEmployee) return null;
     const stats = getEmployeeStats(selectedEmployee.id);
+    const deductions = calculateEmployeeDeductions(selectedEmployee.id);
+    const [editableDeductions, setEditableDeductions] = useState({
+      absentDays: deductions.absentDays,
+      lateDays: deductions.lateDays,
+      absentDeduction: deductions.absentDeduction,
+      lateDeduction: deductions.lateDeduction,
+      lectureMissed: deductions.lectureMissedCount,
+      lectureDeduction: deductions.lectureDeduction,
+      appearanceDeduction: deductions.appearanceDeduction,
+      totalDeductions: deductions.totalDeductions
+    });
+    const [saving, setSaving] = useState(false);
+    const [savedSuccess, setSavedSuccess] = useState(false);
+    
+    // Update deductions when stats change
+    useEffect(() => {
+      const newDeductions = calculateEmployeeDeductions(selectedEmployee.id);
+      setEditableDeductions({
+        absentDays: newDeductions.absentDays,
+        lateDays: newDeductions.lateDays,
+        absentDeduction: newDeductions.absentDeduction,
+        lateDeduction: newDeductions.lateDeduction,
+        lectureMissed: newDeductions.lectureMissedCount,
+        lectureDeduction: newDeductions.lectureDeduction,
+        appearanceDeduction: newDeductions.appearanceDeduction,
+        totalDeductions: newDeductions.totalDeductions
+      });
+      setSavedSuccess(false);
+    }, [selectedEmployee, attendance]);
+
+    const handleDeductionChange = (field: string, value: number) => {
+      // ===== NEW: Sanitize deduction values =====
+      const safeValue = Math.max(0, Number(value) || 0);
+      setEditableDeductions(prev => {
+        const updated = { ...prev, [field]: safeValue };
+        // Recalculate total
+        updated.totalDeductions = 
+          (updated.absentDeduction || 0) + 
+          (updated.lateDeduction || 0) + 
+          (updated.lectureDeduction || 0) + 
+          (updated.appearanceDeduction || 0);
+        return updated;
+      });
+      setSavedSuccess(false);
+    };
+
+    // FIXED: Save deductions to database
+    const saveDeductions = async () => {
+      if (!selectedEmployee) return;
+      
+      setSaving(true);
+      try {
+        // Check if a deduction record already exists for this employee and month
+        const { data: existingRecord, error: checkError } = await supabase
+          .from('employee_deductions')
+          .select('id')
+          .eq('employee_id', selectedEmployee.id)
+          .eq('month', selectedMonth)
+          .maybeSingle();
+
+        if (checkError) throw checkError;
+
+        const deductionData = {
+          employee_id: selectedEmployee.id,
+          month: selectedMonth,
+          absent_days: editableDeductions.absentDays,
+          late_days: editableDeductions.lateDays,
+          absent_deduction: editableDeductions.absentDeduction,
+          late_deduction: editableDeductions.lateDeduction,
+          lecture_missed: editableDeductions.lectureMissed,
+          lecture_deduction: editableDeductions.lectureDeduction,
+          appearance_deduction: editableDeductions.appearanceDeduction,
+          total_deductions: editableDeductions.totalDeductions,
+          updated_at: new Date().toISOString()
+        };
+
+        let result;
+        if (existingRecord) {
+          // Update existing record
+          result = await supabase
+            .from('employee_deductions')
+            .update(deductionData)
+            .eq('id', existingRecord.id);
+        } else {
+          // Insert new record
+          result = await supabase
+            .from('employee_deductions')
+            .insert([{
+              ...deductionData,
+              created_at: new Date().toISOString()
+            }]);
+        }
+
+        if (result.error) throw result.error;
+
+        setSavedSuccess(true);
+        alert(`Deductions saved for ${selectedEmployee.full_name}`);
+        
+        // Optionally refresh the page data
+        await fetchData();
+        
+        // Close modal after 2 seconds
+        setTimeout(() => {
+          setSelectedEmployee(null);
+        }, 2000);
+      } catch (err: any) {
+        console.error('Error saving deductions:', err);
+        alert('Failed to save deductions: ' + err.message);
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    // Load saved deductions if they exist
+    const loadSavedDeductions = async () => {
+      if (!selectedEmployee) return;
+      
+      try {
+        const { data, error } = await supabase
+          .from('employee_deductions')
+          .select('*')
+          .eq('employee_id', selectedEmployee.id)
+          .eq('month', selectedMonth)
+          .maybeSingle();
+
+        if (error) throw error;
+
+        if (data) {
+          setEditableDeductions({
+            absentDays: data.absent_days || 0,
+            lateDays: data.late_days || 0,
+            absentDeduction: data.absent_deduction || 0,
+            lateDeduction: data.late_deduction || 0,
+            lectureMissed: data.lecture_missed || 0,
+            lectureDeduction: data.lecture_deduction || 0,
+            appearanceDeduction: data.appearance_deduction || 0,
+            totalDeductions: data.total_deductions || 0
+          });
+          setSavedSuccess(true);
+        }
+      } catch (err) {
+        console.error('Error loading saved deductions:', err);
+      }
+    };
+
+    // Load saved deductions when modal opens
+    useEffect(() => {
+      if (selectedEmployee) {
+        loadSavedDeductions();
+      }
+    }, [selectedEmployee]);
+
     return (
-      <Modal open={!!selectedEmployee} onClose={() => setSelectedEmployee(null)} title="Attendance Summary" size="md">
-        <div className="space-y-4">
+      <Modal open={!!selectedEmployee} onClose={() => setSelectedEmployee(null)} title="Attendance & Deductions Summary" size="xl">
+        <div className="space-y-6">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-full bg-[#081C3A] text-white text-lg font-bold flex items-center justify-center">
               {selectedEmployee.full_name?.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
             </div>
-            <div><h3 className="font-bold text-slate-800">{selectedEmployee.full_name}</h3><p className="text-sm text-slate-500">{selectedEmployee.position} · {selectedEmployee.employee_number}</p></div>
+            <div>
+              <h3 className="font-bold text-slate-800">{selectedEmployee.full_name}</h3>
+              <p className="text-sm text-slate-500">{selectedEmployee.position} · {selectedEmployee.employee_number}</p>
+              {savedSuccess && (
+                <Badge color="green" className="mt-1">✓ Saved</Badge>
+              )}
+            </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="p-3 bg-emerald-50 rounded-lg flex justify-between items-center"><span className="text-sm">Present</span><span className="font-bold text-emerald-600">{stats.P} days</span></div>
-            <div className="p-3 bg-red-50 rounded-lg flex justify-between items-center"><span className="text-sm">Absent</span><span className="font-bold text-red-600">{stats.A} days</span></div>
-            <div className="p-3 bg-yellow-50 rounded-lg flex justify-between items-center"><span className="text-sm">Late</span><span className="font-bold text-yellow-600">{stats.L} days</span></div>
-            <div className="p-3 bg-blue-50 rounded-lg flex justify-between items-center"><span className="text-sm">Leave</span><span className="font-bold text-blue-600">{stats.LV} days</span></div>
-            <div className="p-3 bg-purple-50 rounded-lg flex justify-between items-center col-span-2"><span className="text-sm">Sick</span><span className="font-bold text-purple-600">{stats.SL} days</span></div>
+
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="p-3 bg-emerald-50 rounded-lg flex justify-between items-center">
+              <span className="text-sm">Present</span>
+              <span className="font-bold text-emerald-600">{stats.P} days</span>
+            </div>
+            <div className="p-3 bg-red-50 rounded-lg flex justify-between items-center">
+              <span className="text-sm">Absent</span>
+              <span className="font-bold text-red-600">{stats.A} days</span>
+            </div>
+            <div className="p-3 bg-yellow-50 rounded-lg flex justify-between items-center">
+              <span className="text-sm">Late</span>
+              <span className="font-bold text-yellow-600">{stats.L} days</span>
+            </div>
+            <div className="p-3 bg-blue-50 rounded-lg flex justify-between items-center">
+              <span className="text-sm">Leave</span>
+              <span className="font-bold text-blue-600">{stats.LV} days</span>
+            </div>
+            <div className="p-3 bg-purple-50 rounded-lg flex justify-between items-center">
+              <span className="text-sm">Sick</span>
+              <span className="font-bold text-purple-600">{stats.SL} days</span>
+            </div>
+          </div>
+
+          {/* Editable Deductions Section */}
+          <div className="border-t border-slate-200 pt-4">
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="font-semibold text-slate-800">Deductions Summary</h4>
+              <div className="flex gap-2">
+                <Button 
+                  variant="outline" 
+                  onClick={loadSavedDeductions}
+                  disabled={saving}
+                  size="sm"
+                >
+                  <RefreshCw size={14} className="mr-1" /> Reload
+                </Button>
+                <Button 
+                  variant="secondary" 
+                  onClick={saveDeductions}
+                  disabled={saving || savedSuccess}
+                >
+                  {saving ? (
+                    <span className="flex items-center gap-2">
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Saving...
+                    </span>
+                  ) : savedSuccess ? (
+                    '✓ Saved'
+                  ) : (
+                    'Save Deductions'
+                  )}
+                </Button>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="p-4 bg-slate-50 rounded-lg">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm text-slate-700">Absent Days</label>
+                    <input
+                      type="number"
+                      value={editableDeductions.absentDays}
+                      onChange={(e) => handleDeductionChange('absentDays', parseInt(e.target.value) || 0)}
+                      className="w-20 px-2 py-1 text-sm border border-slate-200 rounded text-right"
+                      min="0"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm text-slate-700">Absent Deduction (MK)</label>
+                    <input
+                      type="number"
+                      value={editableDeductions.absentDeduction}
+                      onChange={(e) => handleDeductionChange('absentDeduction', parseInt(e.target.value) || 0)}
+                      className="w-28 px-2 py-1 text-sm border border-slate-200 rounded text-right"
+                      min="0"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm text-slate-700">Late Days</label>
+                    <input
+                      type="number"
+                      value={editableDeductions.lateDays}
+                      onChange={(e) => handleDeductionChange('lateDays', parseInt(e.target.value) || 0)}
+                      className="w-20 px-2 py-1 text-sm border border-slate-200 rounded text-right"
+                      min="0"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm text-slate-700">Late Deduction (MK)</label>
+                    <input
+                      type="number"
+                      value={editableDeductions.lateDeduction}
+                      onChange={(e) => handleDeductionChange('lateDeduction', parseInt(e.target.value) || 0)}
+                      className="w-28 px-2 py-1 text-sm border border-slate-200 rounded text-right"
+                      min="0"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-4 bg-slate-50 rounded-lg">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm text-slate-700">Lectures Missed</label>
+                    <input
+                      type="number"
+                      value={editableDeductions.lectureMissed}
+                      onChange={(e) => handleDeductionChange('lectureMissed', parseInt(e.target.value) || 0)}
+                      className="w-20 px-2 py-1 text-sm border border-slate-200 rounded text-right"
+                      min="0"
+                    />
+                    <span className="text-xs text-slate-400">(Wed/Thu)</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm text-slate-700">Lecture Deduction (MK)</label>
+                    <input
+                      type="number"
+                      value={editableDeductions.lectureDeduction}
+                      onChange={(e) => handleDeductionChange('lectureDeduction', parseInt(e.target.value) || 0)}
+                      className="w-28 px-2 py-1 text-sm border border-slate-200 rounded text-right"
+                      min="0"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm text-slate-700">Appearance/Hygiene (MK)</label>
+                    <input
+                      type="number"
+                      value={editableDeductions.appearanceDeduction}
+                      onChange={(e) => handleDeductionChange('appearanceDeduction', parseInt(e.target.value) || 0)}
+                      className="w-28 px-2 py-1 text-sm border border-slate-200 rounded text-right"
+                      min="0"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between pt-3 border-t border-slate-200">
+                    <span className="font-semibold text-slate-800">Total Deductions</span>
+                    <span className="font-bold text-red-600 text-lg">
+                      MK {editableDeductions.totalDeductions.toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 p-3 bg-amber-50 rounded-lg border border-amber-200">
+              <p className="text-xs text-amber-700 flex items-center gap-2">
+                <Scissors size={14} />
+                <strong>Note:</strong> Appearance deduction (MK 2,000) is applied monthly for uniform cleaning, shaving, and keeping hair short and smart. 
+                Lecture deductions (MK 3,000 each) apply for missed Wednesday/Thursday lectures. Full month absence from lectures incurs MK 15,000 deduction.
+              </p>
+            </div>
           </div>
         </div>
       </Modal>
@@ -422,7 +838,16 @@ export function AttendancePage() {
       </Card>
 
       <Card className="p-4 flex flex-col md:flex-row items-stretch md:items-center gap-3">
-        <div className="relative flex-1"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search employees..." className="w-full pl-10 pr-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A]" /></div>
+        <div className="relative flex-1">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          {/* ===== UPDATED: Search input with sanitization ===== */}
+          <input 
+            value={search} 
+            onChange={e => setSearch(sanitizeInput(e.target.value))} 
+            placeholder="Search employees..." 
+            className="w-full pl-10 pr-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A]" 
+          />
+        </div>
       </Card>
 
       {!hasData && dates.length > 0 ? (
@@ -497,4 +922,16 @@ export function AttendancePage() {
       />
     </div>
   );
+}
+
+// Helper function for notifications (add this if not already available)
+function showNotification(message: string, type: 'success' | 'error' | 'info') {
+  // Simple alert for now - replace with your actual notification system
+  if (type === 'success') {
+    console.log('✅', message);
+  } else if (type === 'error') {
+    console.error('❌', message);
+  } else {
+    console.info('ℹ️', message);
+  }
 }

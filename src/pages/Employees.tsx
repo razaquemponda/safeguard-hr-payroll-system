@@ -8,6 +8,7 @@ import { FileText, FileSpreadsheet } from "lucide-react";
 import { PDFDownloadLink } from '@react-pdf/renderer';
 import { EmployeeReportPDF } from '../utils/pdfExport';
 import * as XLSX from 'xlsx';
+import { sanitizeInput } from '../utils/securityHeaders';
 
 interface Employee {
   id: string;
@@ -33,6 +34,7 @@ interface Employee {
   workstation?: string;
   pay_point?: string;
   account_number?: string;
+  uniform_deduction?: number;
 }
 
 // Department options
@@ -53,6 +55,19 @@ const formatText = (value: string) => {
     .trim()
     .replace(/\s+/g, ' ')
     .replace(/[^A-Z0-9\s]/g, '');
+};
+
+// ===== NEW: Calculate age from DOB =====
+const calculateAge = (dob: string): number => {
+  if (!dob) return 0;
+  const birthDate = new Date(dob);
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  return age;
 };
 
 export function EmployeesPage() {
@@ -109,7 +124,7 @@ export function EmployeesPage() {
   const fetchEmployees = async () => {
     setLoading(true);
     try {
-      let query = supabase.from('employees').select('*');
+      let query = supabase.from('employees').select('*').eq('status', 'Active');
       
       if (!userProfile?.is_super_admin && userProfile?.region_id) {
         query = query.eq('region_id', userProfile.region_id);
@@ -148,7 +163,8 @@ export function EmployeesPage() {
         company: emp.company,
         workstation: emp.workstation,
         pay_point: emp.pay_point,
-        account_number: emp.account_number
+        account_number: emp.account_number,
+        uniform_deduction: emp.uniform_deduction || 0
       }));
       setEmployees(mappedEmployees);
     } catch (err: any) {
@@ -169,8 +185,23 @@ export function EmployeesPage() {
     });
   }, [employees, search, statusFilter]);
 
+  // ===== UPDATED: addEmployee with sanitization =====
   const addEmployee = async (emp: any) => {
-    let assignedRegionId = emp.region_id;
+    // Sanitize all text inputs
+    const safeEmp = {
+      ...emp,
+      fullName: sanitizeInput(emp.fullName),
+      position: sanitizeInput(emp.position),
+      department: sanitizeInput(emp.department),
+      address: sanitizeInput(emp.address),
+      qualification: sanitizeInput(emp.qualification),
+      company: sanitizeInput(emp.company),
+      workstation: sanitizeInput(emp.workstation),
+      nationalId: sanitizeInput(emp.nationalId),
+      phone: sanitizeInput(emp.phone),
+    };
+    
+    let assignedRegionId = safeEmp.region_id;
     if (!userProfile?.is_super_admin) {
       assignedRegionId = userProfile?.region_id;
     }
@@ -183,41 +214,47 @@ export function EmployeesPage() {
     const { data: existing } = await supabase
       .from('employees')
       .select('employee_number')
-      .eq('employee_number', emp.employeeNumber)
+      .eq('employee_number', safeEmp.employeeNumber)
       .single();
     
     if (existing) {
-      showNotification(`Employee number ${emp.employeeNumber} already exists!`, 'error');
+      showNotification(`Employee number ${safeEmp.employeeNumber} already exists!`, 'error');
       return;
     }
     
-    const formattedCompany = emp.company ? formatText(emp.company) : null;
-    const formattedWorkstation = emp.workstation ? formatText(emp.workstation) : null;
+    const formattedCompany = safeEmp.company ? formatText(safeEmp.company) : null;
+    const formattedWorkstation = safeEmp.workstation ? formatText(safeEmp.workstation) : null;
+    
+    const uniformDeduction = parseInt(safeEmp.uniform_deduction) || 0;
+    
+    // ===== NEW: Calculate age from DOB =====
+    const calculatedAge = safeEmp.dob ? calculateAge(safeEmp.dob) : 0;
     
     const { data, error } = await supabase
       .from('employees')
       .insert([{
-        employee_number: emp.employeeNumber,
-        full_name: emp.fullName,
-        gender: emp.gender,
-        age: parseInt(emp.age) || 0,
-        phone: emp.phone,
-        position: emp.position,
-        department: emp.department,
-        basic_salary: parseFloat(emp.basicSalary),
-        status: emp.status || 'Active',
-        email: emp.email,
-        hire_date: emp.dateHired && emp.dateHired !== '' ? emp.dateHired : new Date().toISOString().split('T')[0],
-        dob: emp.dob && emp.dob !== '' ? emp.dob : null,
-        national_id: emp.nationalId,
-        address: emp.address,
-        qualification: emp.qualification,
-        contract_type: emp.contractType,
+        employee_number: safeEmp.employeeNumber,
+        full_name: safeEmp.fullName,
+        gender: safeEmp.gender,
+        age: calculatedAge,
+        phone: safeEmp.phone,
+        position: safeEmp.position,
+        department: safeEmp.department,
+        basic_salary: parseFloat(safeEmp.basicSalary),
+        status: safeEmp.status || 'Active',
+        email: safeEmp.email,
+        hire_date: safeEmp.dateHired && safeEmp.dateHired !== '' ? safeEmp.dateHired : new Date().toISOString().split('T')[0],
+        dob: safeEmp.dob && safeEmp.dob !== '' ? safeEmp.dob : null,
+        national_id: safeEmp.nationalId,
+        address: safeEmp.address,
+        qualification: safeEmp.qualification,
+        contract_type: safeEmp.contractType,
         region_id: assignedRegionId,
         company: formattedCompany,
         workstation: formattedWorkstation,
-        pay_point: emp.pay_point,
-        account_number: emp.account_number
+        pay_point: safeEmp.pay_point,
+        account_number: safeEmp.account_number,
+        uniform_deduction: uniformDeduction
       }])
       .select();
     
@@ -246,10 +283,11 @@ export function EmployeesPage() {
         company: data[0].company,
         workstation: data[0].workstation,
         pay_point: data[0].pay_point,
-        account_number: data[0].account_number
+        account_number: data[0].account_number,
+        uniform_deduction: data[0].uniform_deduction || 0
       };
       setEmployees([newEmployee, ...employees]);
-      showNotification(`${emp.fullName} has been added`, 'success');
+      showNotification(`${safeEmp.fullName} has been added`, 'success');
     }
     setShowAdd(false);
   };
@@ -263,35 +301,56 @@ export function EmployeesPage() {
     setShowEdit(true);
   };
 
+  // ===== UPDATED: updateEmployee with sanitization =====
   const updateEmployee = async (emp: any) => {
     if (!editingEmployee) return;
     
-    const formattedCompany = emp.company ? formatText(emp.company) : null;
-    const formattedWorkstation = emp.workstation ? formatText(emp.workstation) : null;
+    // Sanitize all text inputs
+    const safeEmp = {
+      ...emp,
+      fullName: sanitizeInput(emp.fullName),
+      position: sanitizeInput(emp.position),
+      department: sanitizeInput(emp.department),
+      address: sanitizeInput(emp.address),
+      qualification: sanitizeInput(emp.qualification),
+      company: sanitizeInput(emp.company),
+      workstation: sanitizeInput(emp.workstation),
+      nationalId: sanitizeInput(emp.nationalId),
+      phone: sanitizeInput(emp.phone),
+    };
+    
+    const formattedCompany = safeEmp.company ? formatText(safeEmp.company) : null;
+    const formattedWorkstation = safeEmp.workstation ? formatText(safeEmp.workstation) : null;
+    
+    const uniformDeduction = parseInt(safeEmp.uniform_deduction) || 0;
+    
+    // ===== NEW: Calculate age from DOB =====
+    const calculatedAge = safeEmp.dob ? calculateAge(safeEmp.dob) : 0;
     
     const { data, error } = await supabase
       .from('employees')
       .update({
-        employee_number: emp.employeeNumber,
-        full_name: emp.fullName,
-        gender: emp.gender,
-        age: parseInt(emp.age) || 0,
-        phone: emp.phone,
-        position: emp.position,
-        department: emp.department,
-        basic_salary: parseFloat(emp.basicSalary),
-        status: emp.status,
-        email: emp.email,
-        hire_date: emp.dateHired && emp.dateHired !== '' ? emp.dateHired : null,
-        dob: emp.dob && emp.dob !== '' ? emp.dob : null,
-        national_id: emp.nationalId,
-        address: emp.address,
-        qualification: emp.qualification,
-        contract_type: emp.contractType,
+        employee_number: safeEmp.employeeNumber,
+        full_name: safeEmp.fullName,
+        gender: safeEmp.gender,
+        age: calculatedAge,
+        phone: safeEmp.phone,
+        position: safeEmp.position,
+        department: safeEmp.department,
+        basic_salary: parseFloat(safeEmp.basicSalary),
+        status: safeEmp.status,
+        email: safeEmp.email,
+        hire_date: safeEmp.dateHired && safeEmp.dateHired !== '' ? safeEmp.dateHired : null,
+        dob: safeEmp.dob && safeEmp.dob !== '' ? safeEmp.dob : null,
+        national_id: safeEmp.nationalId,
+        address: safeEmp.address,
+        qualification: safeEmp.qualification,
+        contract_type: safeEmp.contractType,
         company: formattedCompany,
         workstation: formattedWorkstation,
-        pay_point: emp.pay_point,
-        account_number: emp.account_number
+        pay_point: safeEmp.pay_point,
+        account_number: safeEmp.account_number,
+        uniform_deduction: uniformDeduction
       })
       .eq('id', editingEmployee.id)
       .select();
@@ -320,10 +379,11 @@ export function EmployeesPage() {
         company: data[0].company,
         workstation: data[0].workstation,
         pay_point: data[0].pay_point,
-        account_number: data[0].account_number
+        account_number: data[0].account_number,
+        uniform_deduction: data[0].uniform_deduction || 0
       };
       setEmployees(employees.map(e => e.id === updatedEmployee.id ? updatedEmployee : e));
-      showNotification(`${emp.fullName} has been updated`, 'success');
+      showNotification(`${safeEmp.fullName} has been updated`, 'success');
     }
     setShowEdit(false);
     setEditingEmployee(null);
@@ -351,10 +411,11 @@ export function EmployeesPage() {
 
   const handleExport = () => {
     const csv = [
-      ['Employee ID', 'Full Name', 'Company', 'Workstation', 'Account Number', 'Gender', 'Age', 'Phone', 'Position', 'Department', 'Basic Salary', 'Status', 'Pay Point'],
+      ['Employee ID', 'Full Name', 'Company', 'Workstation', 'Account Number', 'Gender', 'Age', 'Phone', 'Position', 'Department', 'Basic Salary', 'Status', 'Pay Point', 'Uniform Deduction'],
       ...filtered.map(e => [
         e.employeeNumber, e.fullName, e.company || '', e.workstation || '',
-        e.account_number || '', e.gender, e.age, e.phone, e.position, e.department, e.basicSalary, e.status, e.pay_point || ''
+        e.account_number || '', e.gender, e.age, e.phone, e.position, e.department, e.basicSalary, e.status, e.pay_point || '',
+        e.uniform_deduction || 0
       ])
     ].map(row => row.join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -590,7 +651,7 @@ export function EmployeesPage() {
   );
 }
 
-// AddEmployeeForm Component - WITH WORKING AUTO-GENERATION
+// AddEmployeeForm Component - WITH UNIFORM DEDUCTION FIELD
 function AddEmployeeForm({
   onSubmit,
   onCancel,
@@ -629,6 +690,7 @@ function AddEmployeeForm({
     workstation: "",
     pay_point: "",
     account_number: "",
+    uniform_deduction: 10000,
   });
 
   const [positions, setPositions] = useState<any[]>([]);
@@ -650,7 +712,14 @@ function AddEmployeeForm({
     update("basicSalary", numericValue);
   };
 
-  // Generate employee number based on region (SIMPLE VERSION)
+  // Handle uniform deduction input with commas
+  const handleUniformDeductionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = e.target.value.replace(/[^\d]/g, "");
+    const numericValue = parseInt(rawValue) || 0;
+    update("uniform_deduction", numericValue);
+  };
+
+  // Generate employee number based on region
   const generateEmployeeNumber = async (regionId: string) => {
     if (!regionId || isGenerating) return;
 
@@ -677,7 +746,6 @@ function AddEmployeeForm({
           prefix = "X";
       }
 
-      // Get the next number for this region
       const { data } = await supabase
         .from("employees")
         .select("employee_number")
@@ -695,7 +763,6 @@ function AddEmployeeForm({
       }
 
       const formattedNumber = `${prefix}${nextNumber.toString().padStart(3, "0")}`;
-      // Use a timeout to avoid race conditions
       setTimeout(() => {
         update("employeeNumber", formattedNumber);
       }, 10);
@@ -973,6 +1040,38 @@ function AddEmployeeForm({
         </div>
       </div>
 
+      {/* Uniform Deduction Section */}
+      <div>
+        <h4 className="font-semibold text-slate-800 mb-3 text-sm">
+          Uniform & Benefits
+        </h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">
+              Uniform Deduction (MK)
+              <span className="text-xs text-slate-500 ml-2">(Default: 10,000)</span>
+            </label>
+            <input
+              type="text"
+              value={formatNumberWithCommas(form.uniform_deduction || 0)}
+              onChange={handleUniformDeductionChange}
+              placeholder="10,000"
+              className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A] text-right"
+            />
+            <p className="text-xs text-slate-400 mt-1">
+              This amount will be deducted from monthly income and refunded in terminal dues
+            </p>
+          </div>
+          <div className="flex items-end">
+            <div className="p-3 bg-amber-50 rounded-lg border border-amber-200 w-full">
+              <p className="text-xs text-amber-700">
+                <strong>Note:</strong> Uniform deduction is optional. Enter 0 if no deduction applies.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Bank Account Field */}
       <div>
         <h4 className="font-semibold text-slate-800 mb-3 text-sm">
@@ -1009,9 +1108,7 @@ function AddEmployeeForm({
                 value={form.region_id || ""}
                 onChange={(e) => {
                   const selectedId = e.target.value;
-                  // First update the region
                   setForm((prev: any) => ({ ...prev, region_id: selectedId }));
-                  // Then generate the employee number
                   if (selectedId) {
                     generateEmployeeNumber(selectedId);
                   } else {
@@ -1058,7 +1155,7 @@ function AddEmployeeForm({
   );
 }
 
-// EditEmployeeForm Component (FIXED)
+// EditEmployeeForm Component - WITH UNIFORM DEDUCTION FIELD
 function EditEmployeeForm({ employee, onSubmit, onCancel, departments, regions, isSuperAdmin }: { 
   employee: Employee;
   onSubmit: (e: any) => void; 
@@ -1087,7 +1184,8 @@ function EditEmployeeForm({ employee, onSubmit, onCancel, departments, regions, 
     company: employee.company || '',
     workstation: employee.workstation || '',
     pay_point: employee.pay_point || '',
-    account_number: employee.account_number || ''
+    account_number: employee.account_number || '',
+    uniform_deduction: employee.uniform_deduction || 0,
   });
   
   const [positions, setPositions] = useState<any[]>([]);
@@ -1108,6 +1206,13 @@ function EditEmployeeForm({ employee, onSubmit, onCancel, departments, regions, 
     const rawValue = e.target.value.replace(/[^\d]/g, '');
     const numericValue = parseInt(rawValue) || 0;
     update('basicSalary', numericValue);
+  };
+
+  // Handle uniform deduction input with commas
+  const handleUniformDeductionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = e.target.value.replace(/[^\d]/g, '');
+    const numericValue = parseInt(rawValue) || 0;
+    update('uniform_deduction', numericValue);
   };
 
   // Fetch positions
@@ -1284,6 +1389,38 @@ function EditEmployeeForm({ employee, onSubmit, onCancel, departments, regions, 
         </div>
       </div>
 
+      {/* Uniform Deduction Section - Edit Form */}
+      <div>
+        <h4 className="font-semibold text-slate-800 mb-3 text-sm">
+          Uniform & Benefits
+        </h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">
+              Uniform Deduction (MK)
+              <span className="text-xs text-slate-500 ml-2">(Default: 10,000)</span>
+            </label>
+            <input
+              type="text"
+              value={formatNumberWithCommas(String(form.uniform_deduction || '0'))}
+              onChange={handleUniformDeductionChange}
+              placeholder="10,000"
+              className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A] text-right"
+            />
+            <p className="text-xs text-slate-400 mt-1">
+              This amount will be deducted from monthly income and refunded in terminal dues
+            </p>
+          </div>
+          <div className="flex items-end">
+            <div className="p-3 bg-amber-50 rounded-lg border border-amber-200 w-full">
+              <p className="text-xs text-amber-700">
+                <strong>Note:</strong> Uniform deduction is optional. Enter 0 if no deduction applies.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div>
         <h4 className="font-semibold text-slate-800 mb-3 text-sm">Bank Account</h4>
         <div className="grid grid-cols-1 gap-4">
@@ -1309,7 +1446,7 @@ function EditEmployeeForm({ employee, onSubmit, onCancel, departments, regions, 
   );
 }
 
-// EmployeeProfile Component
+// EmployeeProfile Component - UPDATED WITH UNIFORM DEDUCTION
 function EmployeeProfile({ employee, onBack }: { employee: Employee; onBack: () => void }) {
   const [tab, setTab] = useState('profile');
   
@@ -1371,6 +1508,7 @@ function EmployeeProfile({ employee, onBack }: { employee: Employee; onBack: () 
                 ['Date Hired', employee.dateHired], ['Contract Type', employee.contractType || 'Permanent'],
                 ['Company', employee.company || '-'], ['Workstation', employee.workstation || '-'],
                 ['Pay Point', employee.pay_point || '-'], ['Bank Account', employee.account_number || '-'],
+                ['Uniform Deduction', formatKwacha(employee.uniform_deduction || 0)],
                 ['Status', employee.status]
               ].map(([k, v]) => (
                 <div key={k} className="flex justify-between border-b border-slate-100 pb-2">
@@ -1385,12 +1523,14 @@ function EmployeeProfile({ employee, onBack }: { employee: Employee; onBack: () 
             <div className="space-y-3 text-sm">
               {[
                 ['Basic Salary', formatKwacha(employee.basicSalary)],
+                ['Uniform Deduction', formatKwacha(employee.uniform_deduction || 0)],
                 ['Allowances (10%)', formatKwacha(Math.round(employee.basicSalary * 0.1))],
                 ['Overtime (5%)', formatKwacha(Math.round(employee.basicSalary * 0.05))],
                 ['Gross Pay', formatKwacha(Math.round(employee.basicSalary * 1.15))],
                 ['PAYE (30%)', formatKwacha(Math.round(employee.basicSalary * 1.15 * 0.3))],
                 ['Pension (5%)', formatKwacha(Math.round(employee.basicSalary * 1.15 * 0.05))],
-                ['Net Pay', formatKwacha(Math.round(employee.basicSalary * 1.15 * 0.65))]
+                ['Net Pay (before uniform)', formatKwacha(Math.round(employee.basicSalary * 1.15 * 0.65))],
+                ['Net Pay (after uniform)', formatKwacha(Math.round(employee.basicSalary * 1.15 * 0.65 - (employee.uniform_deduction || 0)))]
               ].map(([k, v]) => (
                 <div key={k} className="flex justify-between border-b border-slate-100 pb-2">
                   <span className="text-slate-500">{k}</span><span className="font-medium text-slate-800">{v}</span>
@@ -1408,8 +1548,8 @@ function EmployeeProfile({ employee, onBack }: { employee: Employee; onBack: () 
             {['July 2025', 'August 2025', 'September 2025', 'October 2025', 'November 2025'].map(period => (
               <div key={period} className="p-4 rounded-lg border border-slate-100 hover:border-[#081C3A] transition-colors">
                 <p className="text-xs text-slate-500">{period}</p>
-                <p className="text-lg font-bold text-slate-800 mt-1">{formatKwacha(Math.round(employee.basicSalary * 1.15 * 0.65))}</p>
-                <p className="text-xs text-slate-500 mt-1">Net Pay</p>
+                <p className="text-lg font-bold text-slate-800 mt-1">{formatKwacha(Math.round(employee.basicSalary * 1.15 * 0.65 - (employee.uniform_deduction || 0)))}</p>
+                <p className="text-xs text-slate-500 mt-1">Net Pay (after uniform)</p>
                 <Button variant="outline" className="mt-3 text-xs w-full py-1.5">View Payslip</Button>
               </div>
             ))}

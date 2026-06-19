@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Shield, Lock, User, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+// ===== NEW: Import rate limiter =====
+import { checkRateLimit } from '../utils/rateLimiter';
 
 export function LoginPage({ onLogin }: { onLogin: () => void }) {
   const [username, setUsername] = useState('');
@@ -22,6 +24,28 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
     }
     if (!password) {
       setError('Please enter your password');
+      setLoading(false);
+      return;
+    }
+
+    // ===== NEW: Check rate limit before attempting login =====
+    // Use the email as the user identifier for rate limiting
+    const rateLimitResult = checkRateLimit(username.trim().toLowerCase());
+    
+    if (!rateLimitResult.allowed) {
+      // Calculate remaining block time in seconds
+      const remainingSeconds = Math.ceil((rateLimitResult.resetTime - Date.now()) / 1000);
+      const minutes = Math.floor(remainingSeconds / 60);
+      const seconds = remainingSeconds % 60;
+      
+      let timeMessage = '';
+      if (minutes > 0) {
+        timeMessage = `${minutes} minute${minutes > 1 ? 's' : ''} and ${seconds} second${seconds > 1 ? 's' : ''}`;
+      } else {
+        timeMessage = `${seconds} second${seconds > 1 ? 's' : ''}`;
+      }
+      
+      setError(`Too many login attempts. Please try again in ${timeMessage}.`);
       setLoading(false);
       return;
     }

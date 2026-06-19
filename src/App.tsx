@@ -14,6 +14,12 @@ import { SettingsPage, FeaturesPage } from "./pages/Misc";
 import { Sidebar, TopBar, BottomNav, NavKey } from "./components/Sidebar";
 import { supabase } from "./lib/supabase";
 import { AuditLogsPage } from "./pages/AuditLogs";
+import { TerminalDuesPage } from './pages/TerminalDues';
+
+// ===== NEW IMPORTS =====
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { startMonitoring } from "./utils/alerts";
+import { logger } from "./utils/logger";
 
 export default function App() {
   const [loggedIn, setLoggedIn] = useState(false);
@@ -22,29 +28,41 @@ export default function App() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userRoleLevel, setUserRoleLevel] = useState<number>(4);
 
+  // ===== NEW: Start monitoring on app load =====
+  useEffect(() => {
+    // Start monitoring for errors and alerts
+    startMonitoring();
+    logger.info('Application started', { version: '2.0.0' });
+  }, []);
+
   // Check if user is logged in and get their role
   useEffect(() => {
     const checkSession = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      setLoggedIn(!!session);
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        setLoggedIn(!!session);
 
-      if (session?.user) {
-        // Fetch user role from profiles table
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("role_level")
-          .eq("id", session.user.id)
-          .single();
+        if (session?.user) {
+          // Fetch user role from profiles table
+          const { data, error } = await supabase
+            .from("profiles")
+            .select("role_level")
+            .eq("id", session.user.id)
+            .single();
 
-        if (error) {
-          console.error("Error fetching role:", error);
-          setUserRoleLevel(4);
-        } else {
-          setUserRoleLevel(data?.role_level || 4);
-          console.log("User role level in App:", data?.role_level);
+          if (error) {
+            console.error("Error fetching role:", error);
+            setUserRoleLevel(4);
+          } else {
+            setUserRoleLevel(data?.role_level || 4);
+            console.log("User role level in App:", data?.role_level);
+            logger.info('User logged in', { userId: session.user.id, role: data?.role_level });
+          }
         }
+      } catch (error) {
+        logger.error('Session check failed', error);
       }
       setLoading(false);
     };
@@ -63,8 +81,10 @@ export default function App() {
           .eq("id", session.user.id)
           .single();
         setUserRoleLevel(data?.role_level || 4);
+        logger.info('Auth state changed', { event: _event, userId: session.user.id });
       } else {
         setUserRoleLevel(4);
+        logger.info('User logged out');
       }
     });
 
@@ -96,6 +116,7 @@ export default function App() {
       "payroll",
       "payslips",
       "payments",
+      "terminal-dues",
       "reports",
       "settings",
       "security",
@@ -108,6 +129,7 @@ export default function App() {
       "recruitment",
       "attendance",
       "payments",
+      "terminal-dues",
       "reports",
       "security",
     ],
@@ -131,6 +153,7 @@ export default function App() {
     payroll: { title: "Payroll Management", breadcrumb: "Payroll" },
     payslips: { title: "Payslips", breadcrumb: "Payslips" },
     payments: { title: "Payment Management", breadcrumb: "Payments" },
+    "terminal-dues": { title: "Terminal Dues Calculator", breadcrumb: "Terminal Dues" },
     reports: { title: "Reports & Analytics", breadcrumb: "Reports" },
     settings: { title: "System Settings", breadcrumb: "Settings" },
     security: { title: "Security Personnel", breadcrumb: "Security" },
@@ -152,6 +175,8 @@ export default function App() {
         return <RecruitmentPage />;
       case "payments":
         return <PaymentsPage />;
+      case "terminal-dues":
+        return <TerminalDuesPage />;
       case "attendance":
         return <AttendancePage />;
       case "payroll":
@@ -173,27 +198,30 @@ export default function App() {
     }
   };
 
+  // ===== WRAP EVERYTHING WITH ERROR BOUNDARY =====
   return (
-    <div className="min-h-screen bg-[#F8FAFC] flex">
-      <Sidebar
-        active={nav}
-        onNavigate={(k) => {
-          setNav(k);
-          setMobileOpen(false);
-        }}
-        open={mobileOpen}
-        onClose={() => setMobileOpen(false)}
-      />
-      <div className="flex-1 flex flex-col w-0">
-        <TopBar
-          title={titles[nav]?.title || "Dashboard"}
-          breadcrumb={titles[nav]?.breadcrumb}
-          onMenuClick={() => setMobileOpen(true)}
+    <ErrorBoundary>
+      <div className="min-h-screen bg-[#F8FAFC] flex">
+        <Sidebar
+          active={nav}
+          onNavigate={(k) => {
+            setNav(k);
+            setMobileOpen(false);
+          }}
+          open={mobileOpen}
+          onClose={() => setMobileOpen(false)}
         />
-        <main className="flex-1 overflow-auto p-4 md:p-6">{renderPage()}</main>
-        <BottomNav active={nav} onNavigate={setNav} />
+        <div className="flex-1 flex flex-col w-0">
+          <TopBar
+            title={titles[nav]?.title || "Dashboard"}
+            breadcrumb={titles[nav]?.breadcrumb}
+            onMenuClick={() => setMobileOpen(true)}
+          />
+          <main className="flex-1 overflow-auto p-4 md:p-6">{renderPage()}</main>
+          <BottomNav active={nav} onNavigate={setNav} />
+        </div>
+        <Toaster position="top-right" richColors />
       </div>
-      <Toaster position="top-right" richColors />
-    </div>
+    </ErrorBoundary>
   );
 }
