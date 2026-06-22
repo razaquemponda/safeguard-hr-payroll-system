@@ -32,6 +32,7 @@ interface AlertConfig {
     };
   };
   enabled: boolean;
+  developmentLogging: boolean; // NEW: Control logging in development
 }
 
 const DEFAULT_CONFIG: AlertConfig = {
@@ -47,7 +48,8 @@ const DEFAULT_CONFIG: AlertConfig = {
     critical: { count: 1, window: 0 },
     warning: { count: 20, window: 5 * 60 * 1000 }
   },
-  enabled: process.env.NODE_ENV === 'production'
+  enabled: process.env.NODE_ENV === 'production',
+  developmentLogging: true // NEW: Log alerts in development
 };
 
 interface Alert {
@@ -90,8 +92,11 @@ class AlertManager {
     message: string,
     data?: any
   ): void {
+    // In development, just log to console
     if (!this.config.enabled) {
-      console.log(`[ALERT] ${severity}: ${title} - ${message}`);
+      if (this.config.developmentLogging) {
+        console.log(`[ALERT] ${severity}: ${title} - ${message}`, data);
+      }
       return;
     }
 
@@ -110,7 +115,11 @@ class AlertManager {
       this.alertHistory.shift();
     }
 
-    logger.warn(`Alert: ${severity} - ${title}`, { message, data });
+    // Only log to logger if enabled (prevents recursive logging)
+    if (this.config.enabled) {
+      logger.warn(`Alert: ${severity} - ${title}`, { message, data });
+    }
+    
     this.checkThresholds(severity, alert);
 
     switch (severity) {
@@ -178,22 +187,52 @@ class AlertManager {
   }
 
   private sendInfoAlert(alert: Alert) {
-    console.log(`[INFO] ${alert.title}: ${alert.message}`);
+    if (this.config.developmentLogging) {
+      console.log(`[INFO] ${alert.title}: ${alert.message}`);
+    }
   }
 
+  // ===== UPDATED: sendToEmail with development logging =====
   private sendToEmail(alert: Alert) {
+    if (!this.config.enabled) {
+      if (this.config.developmentLogging) {
+        console.log(`📧 [DEV] Email alert: ${alert.title}`);
+      }
+      return;
+    }
     console.log(`📧 Sending email alert: ${alert.title} to ${this.config.recipients.email.join(', ')}`);
   }
 
+  // ===== UPDATED: sendToSlack with development logging =====
   private sendToSlack(alert: Alert) {
+    if (!this.config.enabled) {
+      if (this.config.developmentLogging) {
+        console.log(`💬 [DEV] Slack alert: ${alert.title}`);
+      }
+      return;
+    }
     console.log(`💬 Sending Slack alert: ${alert.title} to ${this.config.recipients.slack.join(', ')}`);
   }
 
+  // ===== UPDATED: sendToSMS with development logging =====
   private sendToSMS(alert: Alert) {
+    if (!this.config.enabled) {
+      if (this.config.developmentLogging) {
+        console.log(`📱 [DEV] SMS alert: ${alert.title}`);
+      }
+      return;
+    }
     console.log(`📱 Sending SMS alert: ${alert.title} to ${this.config.recipients.sms.join(', ')}`);
   }
 
+  // ===== UPDATED: sendToPush with development logging =====
   private sendToPush(alert: Alert) {
+    if (!this.config.enabled) {
+      if (this.config.developmentLogging) {
+        console.log(`🔔 [DEV] Push alert: ${alert.title}`);
+      }
+      return;
+    }
     console.log(`🔔 Sending push notification: ${alert.title}`);
   }
 
@@ -232,35 +271,109 @@ export const triggerWarning = (message: string, data?: any) => {
   triggerAlert(AlertSeverity.WARNING, 'Warning', message, data);
 };
 
+// src/utils/alerts.ts
+
+// ===== UPDATED: startMonitoring with NO recursion =====
 export const startMonitoring = () => {
+  // Skip monitoring in development to reduce console noise
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('🔍 Monitoring is active in development mode (errors will be logged to console)');
+  }
+
+  // Store the original console.error BEFORE overriding
+  const originalConsoleError = console.error;
+  const originalConsoleWarn = console.warn;
+  const originalConsoleLog = console.log;
+
+  // Only override console.error in production
+  if (process.env.NODE_ENV === 'production') {
+    console.error = function(...args) {
+      // Call the original FIRST to prevent recursion
+      originalConsoleError.apply(console, args);
+      
+      // Then try to trigger the alert (but don't use console.error inside)
+      try {
+        // Use a direct call without going through the logger
+        if (args[0] && typeof args[0] === 'string') {
+          // Only trigger for real errors, not our own logging attempts
+          if (args[0].includes('Error') || args[0].includes('Failed')) {
+            // Call the alert directly without using console.error
+            triggerAlert(AlertSeverity.ERROR, 'Console Error', args[0] || 'Unknown error', { args });
+          }
+        }
+      } catch (alertError) {
+        // If alert fails, just log to original console
+        originalConsoleError.call(console, 'Alert failed:', alertError);
+      }
+    };
+  }
+
+  // Error event listener - with protection against recursion
   window.addEventListener('error', (event) => {
-    triggerError('Unhandled JavaScript Error', event.error, {
-      message: event.message,
-      filename: event.filename,
-      lineno: event.lineno,
-      colno: event.colno
-    });
+    // Log to original console first
+    originalConsoleError.call(console, 'Unhandled Error:', event.message, event.error);
+    
+    if (process.env.NODE_ENV === 'production') {
+      try {
+        triggerError('Unhandled JavaScript Error', event.error, {
+          message: event.message,
+          filename: event.filename,
+          lineno: event.lineno,
+          colno: event.colno
+        });
+      } catch (e) {
+        originalConsoleError.call(console, 'Failed to trigger error alert:', e);
+      }
+    }
   });
 
+  // Unhandled rejection listener
   window.addEventListener('unhandledrejection', (event) => {
-    triggerError('Unhandled Promise Rejection', event.reason, {
-      promise: event.promise
-    });
+    originalConsoleError.call(console, 'Unhandled Rejection:', event.reason);
+    
+    if (process.env.NODE_ENV === 'production') {
+      try {
+        triggerError('Unhandled Promise Rejection', event.reason, {
+          promise: event.promise
+        });
+      } catch (e) {
+        originalConsoleError.call(console, 'Failed to trigger rejection alert:', e);
+      }
+    }
   });
 
-  const originalError = console.error;
-  console.error = function(...args) {
-    triggerError('Console Error', args[0], { args });
-    originalError.apply(console, args);
-  };
-
+  // Online/Offline listeners
   window.addEventListener('online', () => {
-    logger.info('Network connection restored');
+    if (process.env.NODE_ENV === 'production') {
+      try {
+        logger.info('Network connection restored');
+      } catch (e) {
+        originalConsoleLog.call(console, 'Network restored');
+      }
+    } else {
+      console.log('📶 Network connection restored');
+    }
   });
   
   window.addEventListener('offline', () => {
-    triggerWarning('Network connection lost');
+    if (process.env.NODE_ENV === 'production') {
+      try {
+        triggerWarning('Network connection lost');
+      } catch (e) {
+        originalConsoleWarn.call(console, 'Network lost');
+      }
+    } else {
+      console.warn('📶 Network connection lost');
+    }
   });
 
-  logger.info('Monitoring started');
+  if (process.env.NODE_ENV === 'production') {
+    try {
+      logger.info('Monitoring started');
+    } catch (e) {
+      console.log('Monitoring started (logging disabled)');
+    }
+  } else {
+    console.log('✅ Monitoring started in development mode');
+  }
 };

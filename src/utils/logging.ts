@@ -15,7 +15,7 @@ const LOG_CONFIG = {
   includeTimestamp: true,
   includeUserContext: true,
   enableConsole: true,
-  enableDatabase: process.env.NODE_ENV === 'production',
+  enableDatabase: false, // Temporarily disabled to prevent errors
 };
 
 interface LogEntry {
@@ -26,7 +26,11 @@ interface LogEntry {
   data?: any;
   environment?: string;
   trace?: string;
+  tenant_id?: string;
 }
+
+// ===== Flag to prevent recursive logging =====
+let isLogging = false;
 
 const getUserContext = () => {
   try {
@@ -34,6 +38,26 @@ const getUserContext = () => {
     const user = JSON.parse(userStr);
     return user ? { id: user.id, email: user.email } : null;
   } catch {
+    return null;
+  }
+};
+
+// ===== Function to get current tenant ID =====
+const getCurrentTenantId = async (): Promise<string | null> => {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+    
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('tenant_id')
+      .eq('id', user.id)
+      .single();
+      
+    if (error) throw error;
+    return data?.tenant_id || null;
+  } catch (error) {
+    console.error('Error getting tenant ID:', error);
     return null;
   }
 };
@@ -61,11 +85,31 @@ const formatLogEntry = (level: LogLevel, message: string, data?: any): LogEntry 
   return entry;
 };
 
+// ===== UPDATED: sendToDatabase with recursion prevention =====
 const sendToDatabase = async (entry: LogEntry) => {
-  if (!LOG_CONFIG.enableDatabase) return;
+  // Prevent recursive logging
+  if (isLogging) {
+    console.warn('Skipping recursive log attempt');
+    return;
+  }
+  
+  if (!LOG_CONFIG.enableDatabase) {
+    // Silently skip if database logging is disabled
+    return;
+  }
+  
+  isLogging = true;
   
   try {
-    // FIXED: Using 'created_at' instead of 'timestamp'
+    // Get the current tenant ID
+    const tenantId = await getCurrentTenantId();
+    
+    // If we can't get a tenant ID, skip logging to database
+    if (!tenantId) {
+      console.warn('Skipping log to database: No tenant_id available');
+      return;
+    }
+    
     const { error } = await supabase
       .from('audit_logs')
       .insert([{
@@ -73,14 +117,19 @@ const sendToDatabase = async (entry: LogEntry) => {
         message: entry.message,
         user_id: entry.user?.id,
         data: entry.data,
-        created_at: entry.timestamp  // FIXED: Use created_at
+        created_at: entry.timestamp,
+        tenant_id: tenantId
       }]);
     
     if (error) {
+      // Use direct console.log to avoid recursion
       console.error('Failed to log to database:', error);
     }
   } catch (error) {
+    // Use direct console.log to avoid recursion
     console.error('Failed to send log to database:', error);
+  } finally {
+    isLogging = false;
   }
 };
 
@@ -99,7 +148,10 @@ export const logger = {
     if (LOG_CONFIG.enableConsole) {
       console.log(`[INFO] ${entry.timestamp} - ${message}`, data);
     }
-    sendToDatabase(entry);
+    // Only send to database if not in development
+    if (process.env.NODE_ENV === 'production') {
+      sendToDatabase(entry);
+    }
   },
   
   warn: (message: string, data?: any) => {
@@ -107,7 +159,10 @@ export const logger = {
     if (LOG_CONFIG.enableConsole) {
       console.warn(`[WARN] ${entry.timestamp} - ${message}`, data);
     }
-    sendToDatabase(entry);
+    // Only send to database if not in development
+    if (process.env.NODE_ENV === 'production') {
+      sendToDatabase(entry);
+    }
   },
   
   error: (message: string, error?: any, data?: any) => {
@@ -115,7 +170,10 @@ export const logger = {
     if (LOG_CONFIG.enableConsole) {
       console.error(`[ERROR] ${entry.timestamp} - ${message}`, error, data);
     }
-    sendToDatabase(entry);
+    // Only send to database if not in development
+    if (process.env.NODE_ENV === 'production') {
+      sendToDatabase(entry);
+    }
   },
   
   critical: (message: string, error?: any, data?: any) => {
@@ -123,6 +181,7 @@ export const logger = {
     if (LOG_CONFIG.enableConsole) {
       console.error(`[CRITICAL] ${entry.timestamp} - ${message}`, error, data);
     }
+    // Always send critical errors to database
     sendToDatabase(entry);
   }
 };
