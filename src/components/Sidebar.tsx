@@ -34,7 +34,6 @@ export type NavKey =
   | "features"
   | "auditlogs";
 
-// Define ALL possible nav items with their properties
 export const allNavItems: { id: NavKey; label: string; icon: any }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "employees", label: "Employees", icon: Users },
@@ -48,7 +47,6 @@ export const allNavItems: { id: NavKey; label: string; icon: any }[] = [
   { id: "settings", label: "Settings", icon: Settings },
 ];
 
-// Define which menu items each role can see
 const roleMenuItems: Record<number, NavKey[]> = {
   1: [
     "dashboard",
@@ -93,43 +91,6 @@ export function Sidebar({
   const [userRoleLevel, setUserRoleLevel] = useState<number>(4);
   const [loading, setLoading] = useState(true);
   const [userName, setUserName] = useState<string>("User");
-  const [userEmail, setUserEmail] = useState<string>("");
-  const [isMobile, setIsMobile] = useState(false);
-
-  // Check if mobile
-  useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 1024);
-    };
-    
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
-
-  // Prevent body scroll when sidebar is open on mobile
-  useEffect(() => {
-    if (open && isMobile) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'unset';
-    }
-    return () => {
-      document.body.style.overflow = 'unset';
-    };
-  }, [open, isMobile]);
-
-  // Close sidebar on escape key
-  useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && open) {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleEsc);
-    return () => window.removeEventListener('keydown', handleEsc);
-  }, [open, onClose]);
 
   useEffect(() => {
     const getUserInfo = async () => {
@@ -138,7 +99,6 @@ export function Sidebar({
           data: { user },
         } = await supabase.auth.getUser();
         if (user) {
-          setUserEmail(user.email || "");
           const { data: profile, error } = await supabase
             .from("profiles")
             .select("full_name, role_level")
@@ -155,7 +115,6 @@ export function Sidebar({
             );
             setUserRoleLevel(profile?.role_level || 4);
           }
-          console.log("User role level in sidebar:", userRoleLevel);
         }
       } catch (err) {
         console.error("Failed to get user info:", err);
@@ -190,9 +149,7 @@ export function Sidebar({
       <button
         onClick={() => {
           onNavigate(item.id);
-          if (isMobile) {
-            onClose();
-          }
+          onClose(); // Close sidebar on navigation
         }}
         className={cn(
           "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all group",
@@ -208,7 +165,6 @@ export function Sidebar({
     );
   };
 
-  // Sidebar content
   const content = (
     <>
       <div className="p-5 border-b border-slate-200 flex items-center justify-between">
@@ -223,16 +179,14 @@ export function Sidebar({
             <p className="text-xs text-slate-500">HR & Payroll</p>
           </div>
         </div>
-        {/* ===== CLOSE BUTTON (Mobile Only) ===== */}
-        {isMobile && (
-          <button
-            onClick={onClose}
-            className="p-2 rounded-lg hover:bg-slate-100 transition-colors text-slate-500 hover:text-slate-700"
-            aria-label="Close menu"
-          >
-            <X size={24} />
-          </button>
-        )}
+        {/* Close button for mobile */}
+        <button
+          onClick={onClose}
+          className="lg:hidden p-2 rounded-lg hover:bg-slate-100 transition-colors text-slate-500 hover:text-slate-700"
+          aria-label="Close menu"
+        >
+          <X size={24} />
+        </button>
       </div>
 
       <div className="p-3 flex-1 overflow-y-auto space-y-1">
@@ -245,7 +199,6 @@ export function Sidebar({
           <div className="px-3 py-2 text-sm text-slate-500">Loading...</div>
         )}
 
-        {/* Security and Features - only show for Admin (level 1) */}
         {!loading && userRoleLevel === 1 && (
           <>
             <p className="px-3 py-2 mt-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">
@@ -254,9 +207,7 @@ export function Sidebar({
             <button
               onClick={() => {
                 onNavigate("security");
-                if (isMobile) {
-                  onClose();
-                }
+                onClose();
               }}
               className={cn(
                 "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
@@ -274,9 +225,7 @@ export function Sidebar({
             <button
               onClick={() => {
                 onNavigate("features");
-                if (isMobile) {
-                  onClose();
-                }
+                onClose();
               }}
               className={cn(
                 "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
@@ -321,26 +270,31 @@ export function Sidebar({
 
   return (
     <>
-      {/* ===== DESKTOP SIDEBAR ===== */}
+      {/* Desktop Sidebar */}
       <aside className="hidden lg:flex flex-col w-64 bg-white border-r border-slate-200 h-screen sticky top-0">
         {content}
       </aside>
 
-      {/* ===== MOBILE SIDEBAR (Overlay + Slide) ===== */}
-      {open && (
-        <div className="lg:hidden fixed inset-0 z-50">
-          {/* Overlay */}
-          <div
-            className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm transition-opacity duration-300"
-            onClick={onClose}
-            style={{ touchAction: 'none' }}
-          />
-          {/* Sidebar */}
-          <aside className="absolute left-0 top-0 bottom-0 w-72 bg-white flex flex-col shadow-2xl transition-transform duration-300 ease-in-out translate-x-0">
-            {content}
-          </aside>
-        </div>
-      )}
+      {/* Mobile Sidebar (Overlay + Slide) */}
+      <div
+        className={`lg:hidden fixed inset-0 z-50 transition-opacity duration-300 ${
+          open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        }`}
+      >
+        {/* Overlay */}
+        <div
+          className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm"
+          onClick={onClose}
+        />
+        {/* Sidebar */}
+        <aside
+          className={`absolute left-0 top-0 bottom-0 w-72 bg-white flex flex-col shadow-2xl transition-transform duration-300 ease-in-out ${
+            open ? 'translate-x-0' : '-translate-x-full'
+          }`}
+        >
+          {content}
+        </aside>
+      </div>
     </>
   );
 }
@@ -431,39 +385,26 @@ export function BottomNav({
 }
 
 export function TopBar({
-  onMenu,
+  onMenuClick,
   title,
   breadcrumb,
 }: {
-  onMenu: () => void;
+  onMenuClick: () => void;
   title: string;
   breadcrumb?: string;
 }) {
-  const [isMobile, setIsMobile] = useState(false);
-
-  useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 1024);
-    };
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
-
   return (
     <div className="sticky top-0 z-30 bg-white/80 backdrop-blur border-b border-slate-200">
       <div className="flex items-center justify-between px-4 md:px-6 py-3">
         <div className="flex items-center gap-3">
-          {/* ===== HAMBURGER MENU BUTTON (Mobile Only) ===== */}
-          {isMobile && (
-            <button
-              className="w-10 h-10 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-600 transition-colors"
-              onClick={onMenu}
-              aria-label="Toggle menu"
-            >
-              <Menu size={24} />
-            </button>
-          )}
+          {/* Hamburger Menu Button - Mobile Only */}
+          <button
+            className="lg:hidden w-10 h-10 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-600 transition-colors"
+            onClick={onMenuClick}
+            aria-label="Toggle menu"
+          >
+            <Menu size={24} />
+          </button>
           <div>
             <div className="flex items-center gap-2 text-xs text-slate-500">
               <span className="hidden sm:inline">Safeguard</span>
