@@ -88,6 +88,7 @@ export function AttendancePage() {
           .single();
         console.log('User Profile:', profile);
         console.log('User Region ID:', profile?.region_id);
+        console.log('User Tenant ID:', profile?.tenant_id);
         console.log('Is Super Admin:', profile?.is_super_admin);
         setUserProfile(profile);
       }
@@ -181,9 +182,17 @@ export function AttendancePage() {
     }
   };
 
+  // ===== UPDATED: copyFromPreviousMonth with tenant_id =====
   const copyFromPreviousMonth = async (sourceMonth: string) => {
     const sourceDates = getDatesForMonth(sourceMonth);
     const targetDates = getDatesForMonth(selectedMonth);
+    
+    // ===== NEW: Get tenant_id =====
+    const tenantId = userProfile?.tenant_id;
+    if (!tenantId) {
+      alert('Unable to copy attendance: Missing tenant information');
+      return;
+    }
     
     let sourceQuery = supabase
       .from('attendance')
@@ -216,7 +225,8 @@ export function AttendancePage() {
         return {
           employee_id: record.employee_id,
           date: targetDates[dayOfMonth - 1],
-          status: record.status
+          status: record.status,
+          tenant_id: tenantId  // ===== ADD tenant_id =====
         };
       }).filter(record => record.date);
       
@@ -286,6 +296,7 @@ export function AttendancePage() {
     return record?.status || '-';
   };
 
+  // ===== UPDATED: updateAttendance with tenant_id =====
   const updateAttendance = async (employeeId: string, date: string, currentStatus: string) => {
     const employee = employees.find(e => e.id === employeeId);
     if (!userProfile?.is_super_admin && employee?.region_id !== userProfile?.region_id) {
@@ -298,23 +309,44 @@ export function AttendancePage() {
     const nextStatus = statusCycle[nextIndex];
     
     try {
-      const { data: existingRecord } = await supabase
+      // ===== NEW: Get the tenant_id from userProfile =====
+      const tenantId = userProfile?.tenant_id;
+      
+      if (!tenantId) {
+        console.error('No tenant_id found for user');
+        alert('Unable to update attendance: Missing tenant information');
+        return;
+      }
+      
+      const { data: existingRecord, error: checkError } = await supabase
         .from('attendance')
         .select('id')
         .eq('employee_id', employeeId)
         .eq('date', date)
         .maybeSingle();
       
+      if (checkError) throw checkError;
+      
       let result;
       if (existingRecord) {
+        // ===== UPDATE: Include tenant_id in update =====
         result = await supabase
           .from('attendance')
-          .update({ status: nextStatus })
+          .update({ 
+            status: nextStatus,
+            tenant_id: tenantId  // ===== ADD tenant_id =====
+          })
           .eq('id', existingRecord.id);
       } else {
+        // ===== UPDATE: Include tenant_id in insert =====
         result = await supabase
           .from('attendance')
-          .insert({ employee_id: employeeId, date, status: nextStatus });
+          .insert({ 
+            employee_id: employeeId, 
+            date, 
+            status: nextStatus,
+            tenant_id: tenantId  // ===== ADD tenant_id =====
+          });
       }
       
       if (result.error) throw result.error;
