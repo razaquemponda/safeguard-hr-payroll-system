@@ -12,6 +12,8 @@ import {
   ChevronRight,
   DollarSign,
   Calculator,
+  Menu,
+  X,
 } from "lucide-react";
 import { cn } from "../utils/cn";
 import { supabase } from "../lib/supabase";
@@ -25,7 +27,7 @@ export type NavKey =
   | "payroll"
   | "payslips"
   | "payments"
-  | "terminal-dues"   // ← ADD THIS LINE
+  | "terminal-dues"
   | "reports"
   | "settings"
   | "security"
@@ -92,6 +94,42 @@ export function Sidebar({
   const [loading, setLoading] = useState(true);
   const [userName, setUserName] = useState<string>("User");
   const [userEmail, setUserEmail] = useState<string>("");
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Check if mobile
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 1024);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Prevent body scroll when sidebar is open on mobile
+  useEffect(() => {
+    if (open && isMobile) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [open, isMobile]);
+
+  // Close sidebar on escape key
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && open) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [open, onClose]);
 
   useEffect(() => {
     const getUserInfo = async () => {
@@ -101,7 +139,6 @@ export function Sidebar({
         } = await supabase.auth.getUser();
         if (user) {
           setUserEmail(user.email || "");
-          // Get user profile
           const { data: profile, error } = await supabase
             .from("profiles")
             .select("full_name, role_level")
@@ -153,7 +190,9 @@ export function Sidebar({
       <button
         onClick={() => {
           onNavigate(item.id);
-          onClose();
+          if (isMobile) {
+            onClose();
+          }
         }}
         className={cn(
           "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all group",
@@ -169,9 +208,10 @@ export function Sidebar({
     );
   };
 
+  // Sidebar content
   const content = (
     <>
-      <div className="p-5 border-b border-slate-200">
+      <div className="p-5 border-b border-slate-200 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-[#081C3A] flex items-center justify-center shadow-md">
             <Shield size={20} className="text-[#D4A017]" />
@@ -183,6 +223,16 @@ export function Sidebar({
             <p className="text-xs text-slate-500">HR & Payroll</p>
           </div>
         </div>
+        {/* ===== CLOSE BUTTON (Mobile Only) ===== */}
+        {isMobile && (
+          <button
+            onClick={onClose}
+            className="p-2 rounded-lg hover:bg-slate-100 transition-colors text-slate-500 hover:text-slate-700"
+            aria-label="Close menu"
+          >
+            <X size={24} />
+          </button>
+        )}
       </div>
 
       <div className="p-3 flex-1 overflow-y-auto space-y-1">
@@ -204,7 +254,9 @@ export function Sidebar({
             <button
               onClick={() => {
                 onNavigate("security");
-                onClose();
+                if (isMobile) {
+                  onClose();
+                }
               }}
               className={cn(
                 "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
@@ -222,7 +274,9 @@ export function Sidebar({
             <button
               onClick={() => {
                 onNavigate("features");
-                onClose();
+                if (isMobile) {
+                  onClose();
+                }
               }}
               className={cn(
                 "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
@@ -267,16 +321,22 @@ export function Sidebar({
 
   return (
     <>
+      {/* ===== DESKTOP SIDEBAR ===== */}
       <aside className="hidden lg:flex flex-col w-64 bg-white border-r border-slate-200 h-screen sticky top-0">
         {content}
       </aside>
+
+      {/* ===== MOBILE SIDEBAR (Overlay + Slide) ===== */}
       {open && (
         <div className="lg:hidden fixed inset-0 z-50">
+          {/* Overlay */}
           <div
-            className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+            className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm transition-opacity duration-300"
             onClick={onClose}
+            style={{ touchAction: 'none' }}
           />
-          <aside className="absolute left-0 top-0 bottom-0 w-72 bg-white flex flex-col shadow-2xl animate-fade-in">
+          {/* Sidebar */}
+          <aside className="absolute left-0 top-0 bottom-0 w-72 bg-white flex flex-col shadow-2xl transition-transform duration-300 ease-in-out translate-x-0">
             {content}
           </aside>
         </div>
@@ -333,7 +393,7 @@ export function BottomNav({
     { id: "employees", label: "Employees", icon: Users },
     { id: "payroll", label: "Payroll", icon: Wallet },
     { id: "payments", label: "Payments", icon: DollarSign },
-    { id: "terminal-dues", label: "Terminal Dues", icon: Calculator },  // ← ADD THIS
+    { id: "terminal-dues", label: "Terminal Dues", icon: Calculator },
     { id: "attendance", label: "Attendance", icon: CalendarCheck },
     { id: "settings", label: "Settings", icon: Settings },
     { id: "reports", label: "Reports", icon: BarChart3 },
@@ -349,7 +409,7 @@ export function BottomNav({
 
   return (
     <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex justify-around p-1 z-40 pb-safe">
-      {items.map((item) => {
+      {items.slice(0, 5).map((item) => {
         const Icon = item.icon;
         const isActive = active === item.id;
         return (
@@ -379,16 +439,31 @@ export function TopBar({
   title: string;
   breadcrumb?: string;
 }) {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 1024);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
   return (
     <div className="sticky top-0 z-30 bg-white/80 backdrop-blur border-b border-slate-200">
       <div className="flex items-center justify-between px-4 md:px-6 py-3">
         <div className="flex items-center gap-3">
-          <button
-            className="lg:hidden w-10 h-10 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-600"
-            onClick={onMenu}
-          >
-            <span className="text-xl">☰</span>
-          </button>
+          {/* ===== HAMBURGER MENU BUTTON (Mobile Only) ===== */}
+          {isMobile && (
+            <button
+              className="w-10 h-10 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-600 transition-colors"
+              onClick={onMenu}
+              aria-label="Toggle menu"
+            >
+              <Menu size={24} />
+            </button>
+          )}
           <div>
             <div className="flex items-center gap-2 text-xs text-slate-500">
               <span className="hidden sm:inline">Safeguard</span>
