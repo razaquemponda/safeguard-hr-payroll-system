@@ -1,0 +1,25 @@
+﻿{
+  "short_name": "Safeguard",
+  "name": "Safeguard HR & Payroll Management System",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#081C3A",
+  "theme_color": "#081C3A",
+  "orientation": "portrait-primary",
+  "description": "Enterprise HR and Payroll Management System for Safeguard Security Services",
+  "categories": ["business", "productivity", "human resources"],
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

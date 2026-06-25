@@ -32,7 +32,7 @@ interface AlertConfig {
     };
   };
   enabled: boolean;
-  developmentLogging: boolean; // NEW: Control logging in development
+  developmentLogging: boolean;
 }
 
 const DEFAULT_CONFIG: AlertConfig = {
@@ -49,7 +49,7 @@ const DEFAULT_CONFIG: AlertConfig = {
     warning: { count: 20, window: 5 * 60 * 1000 }
   },
   enabled: process.env.NODE_ENV === 'production',
-  developmentLogging: true // NEW: Log alerts in development
+  developmentLogging: true
 };
 
 interface Alert {
@@ -92,7 +92,6 @@ class AlertManager {
     message: string,
     data?: any
   ): void {
-    // In development, just log to console
     if (!this.config.enabled) {
       if (this.config.developmentLogging) {
         console.log(`[ALERT] ${severity}: ${title} - ${message}`, data);
@@ -115,7 +114,6 @@ class AlertManager {
       this.alertHistory.shift();
     }
 
-    // Only log to logger if enabled (prevents recursive logging)
     if (this.config.enabled) {
       logger.warn(`Alert: ${severity} - ${title}`, { message, data });
     }
@@ -192,7 +190,6 @@ class AlertManager {
     }
   }
 
-  // ===== UPDATED: sendToEmail with development logging =====
   private sendToEmail(alert: Alert) {
     if (!this.config.enabled) {
       if (this.config.developmentLogging) {
@@ -203,7 +200,6 @@ class AlertManager {
     console.log(`📧 Sending email alert: ${alert.title} to ${this.config.recipients.email.join(', ')}`);
   }
 
-  // ===== UPDATED: sendToSlack with development logging =====
   private sendToSlack(alert: Alert) {
     if (!this.config.enabled) {
       if (this.config.developmentLogging) {
@@ -214,7 +210,6 @@ class AlertManager {
     console.log(`💬 Sending Slack alert: ${alert.title} to ${this.config.recipients.slack.join(', ')}`);
   }
 
-  // ===== UPDATED: sendToSMS with development logging =====
   private sendToSMS(alert: Alert) {
     if (!this.config.enabled) {
       if (this.config.developmentLogging) {
@@ -225,7 +220,6 @@ class AlertManager {
     console.log(`📱 Sending SMS alert: ${alert.title} to ${this.config.recipients.sms.join(', ')}`);
   }
 
-  // ===== UPDATED: sendToPush with development logging =====
   private sendToPush(alert: Alert) {
     if (!this.config.enabled) {
       if (this.config.developmentLogging) {
@@ -271,9 +265,7 @@ export const triggerWarning = (message: string, data?: any) => {
   triggerAlert(AlertSeverity.WARNING, 'Warning', message, data);
 };
 
-// src/utils/alerts.ts
-
-// ===== UPDATED: startMonitoring with NO recursion =====
+// ===== UPDATED: startMonitoring with safe error handling =====
 export const startMonitoring = () => {
   // Skip monitoring in development to reduce console noise
   if (process.env.NODE_ENV !== 'production') {
@@ -293,13 +285,28 @@ export const startMonitoring = () => {
       
       // Then try to trigger the alert (but don't use console.error inside)
       try {
-        // Use a direct call without going through the logger
-        if (args[0] && typeof args[0] === 'string') {
-          // Only trigger for real errors, not our own logging attempts
-          if (args[0].includes('Error') || args[0].includes('Failed')) {
-            // Call the alert directly without using console.error
-            triggerAlert(AlertSeverity.ERROR, 'Console Error', args[0] || 'Unknown error', { args });
+        // Safely convert args to string
+        const safeArgs = args.map(arg => {
+          try {
+            if (arg === null) return 'null';
+            if (arg === undefined) return 'undefined';
+            if (typeof arg === 'object') {
+              try {
+                return JSON.stringify(arg);
+              } catch {
+                return String(Object.prototype.toString.call(arg));
+              }
+            }
+            return String(arg);
+          } catch {
+            return '[Unable to convert]';
           }
+        });
+        
+        // Only trigger for real errors, not our own logging attempts
+        const firstArg = safeArgs[0] || '';
+        if (typeof firstArg === 'string' && (firstArg.includes('Error') || firstArg.includes('Failed'))) {
+          triggerAlert(AlertSeverity.ERROR, 'Console Error', firstArg, { args: safeArgs });
         }
       } catch (alertError) {
         // If alert fails, just log to original console
@@ -308,18 +315,44 @@ export const startMonitoring = () => {
     };
   }
 
-  // Error event listener - with protection against recursion
+  // ===== UPDATED: Error event listener with safe object handling =====
   window.addEventListener('error', (event) => {
-    // Log to original console first
-    originalConsoleError.call(console, 'Unhandled Error:', event.message, event.error);
+    // Safely extract error details WITHOUT calling String() on the error object
+    let errorMessage = 'Unknown error';
+    let errorStack = '';
+    let errorName = '';
+    
+    try {
+      if (event.error) {
+        // Safely get message without using String() on the whole object
+        if (typeof event.error === 'object') {
+          errorMessage = event.error.message || Object.prototype.toString.call(event.error);
+          errorStack = event.error.stack || '';
+          errorName = event.error.name || '';
+        } else {
+          errorMessage = String(event.error);
+        }
+      } else if (event.message) {
+        errorMessage = event.message;
+      }
+    } catch (e) {
+      errorMessage = 'Unable to parse error';
+    }
+    
+    // ===== FIX: Log safely without passing the error object directly =====
+    // Use a safe string version of the error
+    const safeErrorString = errorMessage + (errorStack ? '\n' + errorStack : '');
+    originalConsoleError.call(console, 'Unhandled Error:', safeErrorString);
     
     if (process.env.NODE_ENV === 'production') {
       try {
-        triggerError('Unhandled JavaScript Error', event.error, {
-          message: event.message,
+        triggerError('Unhandled JavaScript Error', safeErrorString, {
+          message: errorMessage,
           filename: event.filename,
           lineno: event.lineno,
-          colno: event.colno
+          colno: event.colno,
+          stack: errorStack,
+          name: errorName
         });
       } catch (e) {
         originalConsoleError.call(console, 'Failed to trigger error alert:', e);
@@ -327,13 +360,33 @@ export const startMonitoring = () => {
     }
   });
 
-  // Unhandled rejection listener
+  // ===== UPDATED: Unhandled rejection listener =====
   window.addEventListener('unhandledrejection', (event) => {
-    originalConsoleError.call(console, 'Unhandled Rejection:', event.reason);
+    let reasonMessage = 'Unknown reason';
+    let reasonStack = '';
+    
+    try {
+      if (event.reason) {
+        if (typeof event.reason === 'object') {
+          reasonMessage = event.reason.message || Object.prototype.toString.call(event.reason);
+          reasonStack = event.reason.stack || '';
+        } else {
+          reasonMessage = String(event.reason);
+        }
+      }
+    } catch (e) {
+      reasonMessage = 'Unable to parse rejection reason';
+    }
+    
+    // ===== FIX: Log safely =====
+    const safeReasonString = reasonMessage + (reasonStack ? '\n' + reasonStack : '');
+    originalConsoleError.call(console, 'Unhandled Rejection:', safeReasonString);
     
     if (process.env.NODE_ENV === 'production') {
       try {
-        triggerError('Unhandled Promise Rejection', event.reason, {
+        triggerError('Unhandled Promise Rejection', safeReasonString, {
+          message: reasonMessage,
+          stack: reasonStack,
           promise: event.promise
         });
       } catch (e) {

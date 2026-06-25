@@ -7,50 +7,56 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      'lodash': 'lodash-es',
     },
   },
   server: {
     port: 3000,
     open: true,
-    // ============================================ //
-    // SECURITY HEADERS - ADDED FOR PROTECTION      //
-    // ============================================ //
     headers: {
-      // Prevent MIME type sniffing
       'X-Content-Type-Options': 'nosniff',
-      
-      // Prevent clickjacking
       'X-Frame-Options': 'DENY',
-      
-      // Control referrer information
       'Referrer-Policy': 'strict-origin-when-cross-origin',
-      
-      // Content Security Policy - Prevents XSS
-      'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' https:; connect-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
-      
-      // HSTS - Force HTTPS in production
-      'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
-      
-      // Permissions Policy - Restrict browser features
-      'Permissions-Policy': 'geolocation=(), microphone=(), camera=(), payment=(), usb=(), bluetooth=()',
     },
   },
-  // ============================================ //
-  // BUILD OPTIMIZATION FOR PRODUCTION            //
-  // ============================================ //
   build: {
-    // Generate source maps for debugging (remove in production)
-    sourcemap: true,
-    // Minify code for production
+    sourcemap: false,
     minify: 'esbuild',
-    // Split chunks for better caching
+    target: 'es2020',
+    // ===== CRITICAL: Better chunk splitting =====
     rollupOptions: {
       output: {
         manualChunks: {
-          vendor: ['react', 'react-dom'],
-          supabase: ['@supabase/supabase-js'],
+          // Core - loaded first
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          // UI - loaded second
+          'vendor-ui': ['lucide-react', 'sonner', 'clsx', 'tailwind-merge'],
+          // Charts - loaded on demand (not in initial bundle)
+          'vendor-charts': ['recharts'],
+          // PDF - loaded on demand
+          'vendor-pdf': ['jspdf', 'jspdf-autotable', 'html2canvas'],
+          // Supabase - loaded second
+          'vendor-supabase': ['@supabase/supabase-js'],
         },
+        // ===== NEW: Limit chunk size =====
+        chunkFileNames: 'assets/[name]-[hash].js',
+        entryFileNames: 'assets/[name]-[hash].js',
       },
     },
+    // ===== NEW: Warn if chunks are too big =====
+    chunkSizeWarningLimit: 300,
+  },
+  optimizeDeps: {
+    include: [
+      'react',
+      'react-dom',
+      'react-router-dom',
+      '@supabase/supabase-js',
+      'lucide-react',
+      'sonner',
+      'lodash-es',
+    ],
+    // ===== NEW: Don't pre-bundle large libraries =====
+    exclude: ['recharts', 'jspdf', 'html2canvas'],
   },
 })
