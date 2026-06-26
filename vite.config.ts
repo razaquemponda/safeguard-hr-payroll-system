@@ -8,6 +8,8 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
       'lodash': 'lodash-es',
+      // ===== FIX: Alias react-is correctly =====
+      'react-is': 'react-is/index.js',
     },
   },
   server: {
@@ -23,28 +25,24 @@ export default defineConfig({
     sourcemap: false,
     minify: 'esbuild',
     target: 'es2020',
-    // ===== CRITICAL: Better chunk splitting =====
     rollupOptions: {
       output: {
         manualChunks: {
-          // Core - loaded first
           'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          // UI - loaded second
-          'vendor-ui': ['lucide-react', 'sonner', 'clsx', 'tailwind-merge'],
-          // Charts - loaded on demand (not in initial bundle)
+          'vendor-ui': ['lucide-react', 'sonner'],
           'vendor-charts': ['recharts'],
-          // PDF - loaded on demand
           'vendor-pdf': ['jspdf', 'jspdf-autotable', 'html2canvas'],
-          // Supabase - loaded second
           'vendor-supabase': ['@supabase/supabase-js'],
         },
-        // ===== NEW: Limit chunk size =====
         chunkFileNames: 'assets/[name]-[hash].js',
         entryFileNames: 'assets/[name]-[hash].js',
       },
     },
-    // ===== NEW: Warn if chunks are too big =====
-    chunkSizeWarningLimit: 300,
+    chunkSizeWarningLimit: 500,
+    // ===== FIX: Add commonjs options =====
+    commonjsOptions: {
+      include: [/react-is/, /node_modules/],
+    },
   },
   optimizeDeps: {
     include: [
@@ -55,8 +53,13 @@ export default defineConfig({
       'lucide-react',
       'sonner',
       'lodash-es',
+      'react-is',
+      'es-toolkit',
+      'recharts',
     ],
-    // ===== NEW: Don't pre-bundle large libraries =====
-    exclude: ['recharts', 'jspdf', 'html2canvas'],
+    exclude: ['jspdf', 'html2canvas'],
+    esbuildOptions: {
+      target: 'es2020',
+    },
   },
 })

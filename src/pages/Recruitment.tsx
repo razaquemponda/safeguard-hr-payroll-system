@@ -362,3 +362,5 @@ export function RecruitmentPage() {
     </div>
   );
 }
+
+export default RecruitmentPage;

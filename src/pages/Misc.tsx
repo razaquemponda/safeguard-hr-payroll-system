@@ -1070,3 +1070,5 @@ export function FeaturesPage() {
     </div>
   );
 }
+
+export default SettingsPage;

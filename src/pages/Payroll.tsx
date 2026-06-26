@@ -676,3 +676,5 @@ export function PayrollPage() {
     </div>
   );
 }
+
+export default PayrollPage;

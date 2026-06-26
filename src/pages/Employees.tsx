@@ -4,10 +4,6 @@ import { Card, Button, Badge, THead, TBody, TR, TH, TD, Modal, PageHeader, Tabs 
 import { formatKwacha } from '../data';
 import { supabase } from '../lib/supabase';
 import { showNotification } from '../utils/clickHandlers';
-import { FileText, FileSpreadsheet } from "lucide-react";
-import { PDFDownloadLink } from '@react-pdf/renderer';
-import { EmployeeReportPDF } from '../utils/pdfExport';
-import * as XLSX from 'xlsx';
 import { sanitizeInput } from '../utils/securityHeaders';
 
 interface Employee {
@@ -37,7 +33,6 @@ interface Employee {
   uniform_deduction?: number;
 }
 
-// Department options
 const departmentOptions = [
   'Operations (Guards, K9, Supervisors)',
   'Finance',
@@ -48,7 +43,6 @@ const departmentOptions = [
   'Technical'
 ];
 
-// Auto-format function for text fields
 const formatText = (value: string) => {
   return value
     .toUpperCase()
@@ -57,7 +51,6 @@ const formatText = (value: string) => {
     .replace(/[^A-Z0-9\s]/g, '');
 };
 
-// ===== NEW: Calculate age from DOB =====
 const calculateAge = (dob: string): number => {
   if (!dob) return 0;
   const birthDate = new Date(dob);
@@ -85,11 +78,9 @@ export function EmployeesPage() {
   const [filterWorkstation, setFilterWorkstation] = useState<string>('');
   const [filterPayPoint, setFilterPayPoint] = useState<string>('');
   
-  // User authentication state
   const [userProfile, setUserProfile] = useState<any>(null);
   const [userLoading, setUserLoading] = useState(true);
 
-  // Fetch current user profile
   useEffect(() => {
     const fetchUserProfile = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -185,9 +176,7 @@ export function EmployeesPage() {
     });
   }, [employees, search, statusFilter]);
 
-  // ===== UPDATED: addEmployee with sanitization =====
   const addEmployee = async (emp: any) => {
-    // Sanitize all text inputs
     const safeEmp = {
       ...emp,
       fullName: sanitizeInput(emp.fullName),
@@ -226,8 +215,6 @@ export function EmployeesPage() {
     const formattedWorkstation = safeEmp.workstation ? formatText(safeEmp.workstation) : null;
     
     const uniformDeduction = parseInt(safeEmp.uniform_deduction) || 0;
-    
-    // ===== NEW: Calculate age from DOB =====
     const calculatedAge = safeEmp.dob ? calculateAge(safeEmp.dob) : 0;
     
     const { data, error } = await supabase
@@ -301,11 +288,9 @@ export function EmployeesPage() {
     setShowEdit(true);
   };
 
-  // ===== UPDATED: updateEmployee with sanitization =====
   const updateEmployee = async (emp: any) => {
     if (!editingEmployee) return;
     
-    // Sanitize all text inputs
     const safeEmp = {
       ...emp,
       fullName: sanitizeInput(emp.fullName),
@@ -323,8 +308,6 @@ export function EmployeesPage() {
     const formattedWorkstation = safeEmp.workstation ? formatText(safeEmp.workstation) : null;
     
     const uniformDeduction = parseInt(safeEmp.uniform_deduction) || 0;
-    
-    // ===== NEW: Calculate age from DOB =====
     const calculatedAge = safeEmp.dob ? calculateAge(safeEmp.dob) : 0;
     
     const { data, error } = await supabase
@@ -651,7 +634,7 @@ export function EmployeesPage() {
   );
 }
 
-// AddEmployeeForm Component - WITH UNIFORM DEDUCTION FIELD
+// AddEmployeeForm Component
 function AddEmployeeForm({
   onSubmit,
   onCancel,
@@ -700,26 +683,22 @@ function AddEmployeeForm({
     setForm((prev: any) => ({ ...prev, [k]: v }));
   };
 
-  // Format number with commas for salary display
   const formatNumberWithCommas = (value: number) => {
     return value.toLocaleString();
   };
 
-  // Handle salary input with commas
   const handleSalaryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const rawValue = e.target.value.replace(/[^\d]/g, "");
     const numericValue = parseInt(rawValue) || 0;
     update("basicSalary", numericValue);
   };
 
-  // Handle uniform deduction input with commas
   const handleUniformDeductionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const rawValue = e.target.value.replace(/[^\d]/g, "");
     const numericValue = parseInt(rawValue) || 0;
     update("uniform_deduction", numericValue);
   };
 
-  // Generate employee number based on region
   const generateEmployeeNumber = async (regionId: string) => {
     if (!regionId || isGenerating) return;
 
@@ -773,7 +752,6 @@ function AddEmployeeForm({
     }
   };
 
-  // Fetch positions from database
   useEffect(() => {
     const fetchPositions = async () => {
       try {
@@ -878,8 +856,7 @@ function AddEmployeeForm({
         <div>
           <strong>Employment Form</strong>
           <br />
-          Complete all required fields. Employee will be added to active
-          records.
+          Complete all required fields. Employee will be added to active records.
           {!isSuperAdmin && userRegionName && (
             <span className="block mt-1 text-xs text-[#D4A017]">
               Will be assigned to: {userRegionName}
@@ -889,23 +866,17 @@ function AddEmployeeForm({
       </div>
 
       <div>
-        <h4 className="font-semibold text-slate-800 mb-3 text-sm">
-          Personal Information
-        </h4>
+        <h4 className="font-semibold text-slate-800 mb-3 text-sm">Personal Information</h4>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">
-              Employee Number
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Employee Number</label>
             <input
               type="text"
               value={form.employeeNumber}
               disabled
               className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-slate-50 font-mono"
             />
-            <p className="text-xs text-slate-400 mt-1">
-              Auto-generated after selecting region
-            </p>
+            <p className="text-xs text-slate-400 mt-1">Auto-generated after selecting region</p>
           </div>
           {field("fullName", "Full Name", "text", true)}
           {field("dob", "Date of Birth", "date")}
@@ -920,9 +891,7 @@ function AddEmployeeForm({
       </div>
 
       <div>
-        <h4 className="font-semibold text-slate-800 mb-3 text-sm">
-          Employment Information
-        </h4>
+        <h4 className="font-semibold text-slate-800 mb-3 text-sm">Employment Information</h4>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {field(
             "position",
@@ -954,14 +923,10 @@ function AddEmployeeForm({
       </div>
 
       <div>
-        <h4 className="font-semibold text-slate-800 mb-3 text-sm">
-          Company & Location
-        </h4>
+        <h4 className="font-semibold text-slate-800 mb-3 text-sm">Company & Location</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">
-              Company
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Company</label>
             <input
               type="text"
               value={form.company || ""}
@@ -974,14 +939,10 @@ function AddEmployeeForm({
               placeholder="e.g., MASM, AHL, TCC"
               className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A] uppercase"
             />
-            <p className="text-xs text-slate-400 mt-1">
-              Auto-formatted to UPPERCASE
-            </p>
+            <p className="text-xs text-slate-400 mt-1">Auto-formatted to UPPERCASE</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">
-              Workstation / Site
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Workstation / Site</label>
             <input
               type="text"
               value={form.workstation || ""}
@@ -994,22 +955,16 @@ function AddEmployeeForm({
               placeholder="e.g., CLINIC, MAIN OFFICE, GATE 1"
               className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A] uppercase"
             />
-            <p className="text-xs text-slate-400 mt-1">
-              Auto-formatted to UPPERCASE
-            </p>
+            <p className="text-xs text-slate-400 mt-1">Auto-formatted to UPPERCASE</p>
           </div>
         </div>
       </div>
 
       <div>
-        <h4 className="font-semibold text-slate-800 mb-3 text-sm">
-          Compensation & Payment
-        </h4>
+        <h4 className="font-semibold text-slate-800 mb-3 text-sm">Compensation & Payment</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">
-              Basic Salary (MK)
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Basic Salary (MK)</label>
             <input
               type="text"
               value={formatNumberWithCommas(form.basicSalary || 0)}
@@ -1018,9 +973,7 @@ function AddEmployeeForm({
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">
-              Pay Point
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Pay Point</label>
             <select
               value={form.pay_point || ""}
               onChange={(e) => update("pay_point", e.target.value)}
@@ -1040,11 +993,8 @@ function AddEmployeeForm({
         </div>
       </div>
 
-      {/* Uniform Deduction Section */}
       <div>
-        <h4 className="font-semibold text-slate-800 mb-3 text-sm">
-          Uniform & Benefits
-        </h4>
+        <h4 className="font-semibold text-slate-800 mb-3 text-sm">Uniform & Benefits</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1.5">
@@ -1058,9 +1008,7 @@ function AddEmployeeForm({
               placeholder="10,000"
               className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A] text-right"
             />
-            <p className="text-xs text-slate-400 mt-1">
-              This amount will be deducted from monthly income and refunded in terminal dues
-            </p>
+            <p className="text-xs text-slate-400 mt-1">This amount will be deducted from monthly income and refunded in terminal dues</p>
           </div>
           <div className="flex items-end">
             <div className="p-3 bg-amber-50 rounded-lg border border-amber-200 w-full">
@@ -1072,16 +1020,11 @@ function AddEmployeeForm({
         </div>
       </div>
 
-      {/* Bank Account Field */}
       <div>
-        <h4 className="font-semibold text-slate-800 mb-3 text-sm">
-          Bank Account
-        </h4>
+        <h4 className="font-semibold text-slate-800 mb-3 text-sm">Bank Account</h4>
         <div className="grid grid-cols-1 gap-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">
-              Bank Account / Mobile Money Number
-            </label>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Bank Account / Mobile Money Number</label>
             <input
               type="text"
               value={form.account_number || ""}
@@ -1089,9 +1032,7 @@ function AddEmployeeForm({
               placeholder="e.g., 5063532125021 or 0888123456"
               className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A]"
             />
-            <p className="text-xs text-slate-400 mt-1">
-              Bank account number for salary payments
-            </p>
+            <p className="text-xs text-slate-400 mt-1">Bank account number for salary payments</p>
           </div>
         </div>
       </div>
@@ -1137,25 +1078,14 @@ function AddEmployeeForm({
       </div>
 
       <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-medium hover:bg-slate-50"
-        >
-          Cancel
-        </button>
-        <button
-          type="submit"
-          className="px-5 py-2 rounded-lg bg-[#D4A017] text-white text-sm font-semibold hover:bg-[#e8b82e]"
-        >
-          ✓ Hire Employee
-        </button>
+        <button type="button" onClick={onCancel} className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-medium hover:bg-slate-50">Cancel</button>
+        <button type="submit" className="px-5 py-2 rounded-lg bg-[#D4A017] text-white text-sm font-semibold hover:bg-[#e8b82e]">✓ Hire Employee</button>
       </div>
     </form>
   );
 }
 
-// EditEmployeeForm Component - WITH UNIFORM DEDUCTION FIELD
+// EditEmployeeForm Component
 function EditEmployeeForm({ employee, onSubmit, onCancel, departments, regions, isSuperAdmin }: { 
   employee: Employee;
   onSubmit: (e: any) => void; 
@@ -1194,28 +1124,24 @@ function EditEmployeeForm({ employee, onSubmit, onCancel, departments, regions, 
     setForm({ ...form, [k]: v });
   };
 
-  // Format number with commas
   const formatNumberWithCommas = (value: string) => {
     const cleanValue = value.replace(/[^\d]/g, '');
     if (!cleanValue) return '0';
     return parseInt(cleanValue).toLocaleString();
   };
 
-  // Handle salary input with commas
   const handleSalaryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const rawValue = e.target.value.replace(/[^\d]/g, '');
     const numericValue = parseInt(rawValue) || 0;
     update('basicSalary', numericValue);
   };
 
-  // Handle uniform deduction input with commas
   const handleUniformDeductionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const rawValue = e.target.value.replace(/[^\d]/g, '');
     const numericValue = parseInt(rawValue) || 0;
     update('uniform_deduction', numericValue);
   };
 
-  // Fetch positions
   useEffect(() => {
     const fetchPositions = async () => {
       const { data } = await supabase
@@ -1389,11 +1315,8 @@ function EditEmployeeForm({ employee, onSubmit, onCancel, departments, regions, 
         </div>
       </div>
 
-      {/* Uniform Deduction Section - Edit Form */}
       <div>
-        <h4 className="font-semibold text-slate-800 mb-3 text-sm">
-          Uniform & Benefits
-        </h4>
+        <h4 className="font-semibold text-slate-800 mb-3 text-sm">Uniform & Benefits</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1.5">
@@ -1407,9 +1330,7 @@ function EditEmployeeForm({ employee, onSubmit, onCancel, departments, regions, 
               placeholder="10,000"
               className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#081C3A] text-right"
             />
-            <p className="text-xs text-slate-400 mt-1">
-              This amount will be deducted from monthly income and refunded in terminal dues
-            </p>
+            <p className="text-xs text-slate-400 mt-1">This amount will be deducted from monthly income and refunded in terminal dues</p>
           </div>
           <div className="flex items-end">
             <div className="p-3 bg-amber-50 rounded-lg border border-amber-200 w-full">
@@ -1446,7 +1367,7 @@ function EditEmployeeForm({ employee, onSubmit, onCancel, departments, regions, 
   );
 }
 
-// EmployeeProfile Component - UPDATED WITH UNIFORM DEDUCTION
+// EmployeeProfile Component
 function EmployeeProfile({ employee, onBack }: { employee: Employee; onBack: () => void }) {
   const [tab, setTab] = useState('profile');
   
@@ -1603,3 +1524,5 @@ function EmployeeProfile({ employee, onBack }: { employee: Employee; onBack: () 
     </div>
   );
 }
+
+export default EmployeesPage;

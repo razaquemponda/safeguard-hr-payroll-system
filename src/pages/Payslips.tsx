@@ -955,3 +955,5 @@ export function PayslipsPage() {
     </div>
   );
 }
+
+export default PayslipsPage;

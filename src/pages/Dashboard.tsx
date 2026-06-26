@@ -168,7 +168,7 @@ export function Dashboard() {
       setRecent(employeesData.slice(0, 6));
       
       // Employee growth
-      const growth = [];
+      const growth: { year: string; employees: number }[] = [];
       const years = ['2022', '2023', '2024', '2025'];
       let cumulative = 0;
       for (const year of years) {
@@ -463,3 +463,8 @@ export function Dashboard() {
     </div>
   );
 }
+
+// ==============================================
+// ✅ ADD THIS LINE AT THE VERY END
+// ==============================================
+export default Dashboard;

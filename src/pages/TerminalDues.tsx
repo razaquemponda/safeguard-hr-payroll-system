@@ -1011,3 +1011,5 @@ export function TerminalDuesPage() {
     </div>
   );
 }
+
+export default TerminalDuesPage;

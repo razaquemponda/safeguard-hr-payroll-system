@@ -6,7 +6,6 @@ import { getAvailableMonths, getCurrentMonth, getDateRangeFromMonth, isFutureMon
 import { MonthSelector } from '../components/MonthSelector';
 import { EmptyState } from '../components/EmptyState';
 import { CopyFromPreviousModal } from '../components/CopyFromPreviousModal';
-// ===== NEW: Import sanitization =====
 import { sanitizeInput } from '../utils/securityHeaders';
 
 const statusColors: Record<string, string> = {
@@ -45,7 +44,6 @@ interface AttendanceRecord {
   status: string;
 }
 
-// NEW: Deduction settings interface
 interface DeductionSettings {
   absentDeduction: number;
   lateDeduction: number;
@@ -67,7 +65,6 @@ export function AttendancePage() {
   const [userProfile, setUserProfile] = useState<any>(null);
   const availableMonths = getAvailableMonths();
   
-  // NEW: Deduction settings state with defaults
   const [deductionSettings, setDeductionSettings] = useState<DeductionSettings>({
     absentDeduction: 4200,
     lateDeduction: 4200,
@@ -76,7 +73,6 @@ export function AttendancePage() {
     appearanceDeduction: 2000
   });
 
-  // Fetch user profile for region access
   useEffect(() => {
     const fetchUserProfile = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -95,14 +91,11 @@ export function AttendancePage() {
     };
     fetchUserProfile();
     
-    // NEW: Load deduction settings from localStorage or database
     loadDeductionSettings();
   }, []);
 
-  // NEW: Load deduction settings
   const loadDeductionSettings = async () => {
     try {
-      // Try to load from localStorage first
       const saved = localStorage.getItem('attendanceDeductionSettings');
       if (saved) {
         const parsed = JSON.parse(saved);
@@ -113,18 +106,8 @@ export function AttendancePage() {
     }
   };
 
-  // NEW: Save deduction settings
-  const saveDeductionSettings = async (settings: DeductionSettings) => {
-    try {
-      localStorage.setItem('attendanceDeductionSettings', JSON.stringify(settings));
-      setDeductionSettings(settings);
-    } catch (err) {
-      console.error('Error saving deduction settings:', err);
-    }
-  };
-
   function getDatesForMonth(monthYear: string) {
-    const { startDate, endDate, daysInMonth } = getDateRangeFromMonth(monthYear);
+    const { startDate, daysInMonth } = getDateRangeFromMonth(monthYear);
     const dates = [];
     for (let i = 1; i <= daysInMonth; i++) {
       const dateStr = `${startDate.slice(0, 8)}${String(i).padStart(2, '0')}`;
@@ -182,12 +165,10 @@ export function AttendancePage() {
     }
   };
 
-  // ===== UPDATED: copyFromPreviousMonth with tenant_id =====
   const copyFromPreviousMonth = async (sourceMonth: string) => {
     const sourceDates = getDatesForMonth(sourceMonth);
     const targetDates = getDatesForMonth(selectedMonth);
     
-    // ===== NEW: Get tenant_id =====
     const tenantId = userProfile?.tenant_id;
     if (!tenantId) {
       alert('Unable to copy attendance: Missing tenant information');
@@ -226,7 +207,7 @@ export function AttendancePage() {
           employee_id: record.employee_id,
           date: targetDates[dayOfMonth - 1],
           status: record.status,
-          tenant_id: tenantId  // ===== ADD tenant_id =====
+          tenant_id: tenantId
         };
       }).filter(record => record.date);
       
@@ -296,7 +277,6 @@ export function AttendancePage() {
     return record?.status || '-';
   };
 
-  // ===== UPDATED: updateAttendance with tenant_id =====
   const updateAttendance = async (employeeId: string, date: string, currentStatus: string) => {
     const employee = employees.find(e => e.id === employeeId);
     if (!userProfile?.is_super_admin && employee?.region_id !== userProfile?.region_id) {
@@ -309,7 +289,6 @@ export function AttendancePage() {
     const nextStatus = statusCycle[nextIndex];
     
     try {
-      // ===== NEW: Get the tenant_id from userProfile =====
       const tenantId = userProfile?.tenant_id;
       
       if (!tenantId) {
@@ -329,23 +308,21 @@ export function AttendancePage() {
       
       let result;
       if (existingRecord) {
-        // ===== UPDATE: Include tenant_id in update =====
         result = await supabase
           .from('attendance')
           .update({ 
             status: nextStatus,
-            tenant_id: tenantId  // ===== ADD tenant_id =====
+            tenant_id: tenantId
           })
           .eq('id', existingRecord.id);
       } else {
-        // ===== UPDATE: Include tenant_id in insert =====
         result = await supabase
           .from('attendance')
           .insert({ 
             employee_id: employeeId, 
             date, 
             status: nextStatus,
-            tenant_id: tenantId  // ===== ADD tenant_id =====
+            tenant_id: tenantId
           });
       }
       
@@ -369,7 +346,6 @@ export function AttendancePage() {
     return { ...counts, total };
   };
 
-  // NEW: Calculate deductions for an employee
   const calculateEmployeeDeductions = (employeeId: string) => {
     const employeeAttendance = attendance.filter(a => a.employee_id === employeeId);
     const counts = { A: 0, L: 0 };
@@ -380,11 +356,10 @@ export function AttendancePage() {
       if (record.status === 'L') counts.L++;
     });
     
-    // Count lectures missed (Wednesdays and Thursdays)
     const dates = getDatesForMonth(selectedMonth);
     dates.forEach(date => {
       const dateObj = new Date(date);
-      const dayOfWeek = dateObj.getDay(); // 3 = Wednesday, 4 = Thursday
+      const dayOfWeek = dateObj.getDay();
       if (dayOfWeek === 3 || dayOfWeek === 4) {
         const status = getAttendanceStatus(employeeId, date);
         if (status === 'A') {
@@ -393,16 +368,12 @@ export function AttendancePage() {
       }
     });
     
-    // Calculate deductions
-    const absentLateCount = counts.A + counts.L;
     const absentDeduction = counts.A * deductionSettings.absentDeduction;
     const lateDeduction = counts.L * deductionSettings.lateDeduction;
     const attendanceDeduction = absentDeduction + lateDeduction;
     
-    // Lecture deductions
     let lectureDeduction = 0;
     if (lectureMissedCount > 0) {
-      // Check if missed all lectures in month
       const totalLectures = dates.filter(d => {
         const dayOfWeek = new Date(d).getDay();
         return dayOfWeek === 3 || dayOfWeek === 4;
@@ -415,9 +386,7 @@ export function AttendancePage() {
       }
     }
     
-    // Appearance deduction (deducted monthly if employee is active)
     const appearanceDeduction = deductionSettings.appearanceDeduction;
-    
     const totalDeductions = attendanceDeduction + lectureDeduction + appearanceDeduction;
     
     return {
@@ -456,7 +425,6 @@ export function AttendancePage() {
   const metrics = calculateMetrics();
   const dates = getDatesForMonth(selectedMonth);
   
-  // ===== UPDATED: Filter employees with sanitized search =====
   const filteredEmployees = employees.filter(e => {
     const safeSearch = sanitizeInput(search).toLowerCase();
     return e.full_name?.toLowerCase().includes(safeSearch) ||
@@ -499,7 +467,6 @@ export function AttendancePage() {
     return <div className="text-center py-12 text-red-500">{error}</div>;
   }
 
-  // NEW: Enhanced Employee Modal with editable deductions
   const EmployeeModal = () => {
     if (!selectedEmployee) return null;
     const stats = getEmployeeStats(selectedEmployee.id);
@@ -517,7 +484,6 @@ export function AttendancePage() {
     const [saving, setSaving] = useState(false);
     const [savedSuccess, setSavedSuccess] = useState(false);
     
-    // Update deductions when stats change
     useEffect(() => {
       const newDeductions = calculateEmployeeDeductions(selectedEmployee.id);
       setEditableDeductions({
@@ -534,11 +500,9 @@ export function AttendancePage() {
     }, [selectedEmployee, attendance]);
 
     const handleDeductionChange = (field: string, value: number) => {
-      // ===== NEW: Sanitize deduction values =====
       const safeValue = Math.max(0, Number(value) || 0);
       setEditableDeductions(prev => {
         const updated = { ...prev, [field]: safeValue };
-        // Recalculate total
         updated.totalDeductions = 
           (updated.absentDeduction || 0) + 
           (updated.lateDeduction || 0) + 
@@ -549,13 +513,11 @@ export function AttendancePage() {
       setSavedSuccess(false);
     };
 
-    // FIXED: Save deductions to database
     const saveDeductions = async () => {
       if (!selectedEmployee) return;
       
       setSaving(true);
       try {
-        // Check if a deduction record already exists for this employee and month
         const { data: existingRecord, error: checkError } = await supabase
           .from('employee_deductions')
           .select('id')
@@ -581,13 +543,11 @@ export function AttendancePage() {
 
         let result;
         if (existingRecord) {
-          // Update existing record
           result = await supabase
             .from('employee_deductions')
             .update(deductionData)
             .eq('id', existingRecord.id);
         } else {
-          // Insert new record
           result = await supabase
             .from('employee_deductions')
             .insert([{
@@ -600,11 +560,7 @@ export function AttendancePage() {
 
         setSavedSuccess(true);
         alert(`Deductions saved for ${selectedEmployee.full_name}`);
-        
-        // Optionally refresh the page data
         await fetchData();
-        
-        // Close modal after 2 seconds
         setTimeout(() => {
           setSelectedEmployee(null);
         }, 2000);
@@ -616,7 +572,6 @@ export function AttendancePage() {
       }
     };
 
-    // Load saved deductions if they exist
     const loadSavedDeductions = async () => {
       if (!selectedEmployee) return;
       
@@ -648,7 +603,6 @@ export function AttendancePage() {
       }
     };
 
-    // Load saved deductions when modal opens
     useEffect(() => {
       if (selectedEmployee) {
         loadSavedDeductions();
@@ -694,7 +648,6 @@ export function AttendancePage() {
             </div>
           </div>
 
-          {/* Editable Deductions Section */}
           <div className="border-t border-slate-200 pt-4">
             <div className="flex items-center justify-between mb-4">
               <h4 className="font-semibold text-slate-800">Deductions Summary</h4>
@@ -872,7 +825,6 @@ export function AttendancePage() {
       <Card className="p-4 flex flex-col md:flex-row items-stretch md:items-center gap-3">
         <div className="relative flex-1">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          {/* ===== UPDATED: Search input with sanitization ===== */}
           <input 
             value={search} 
             onChange={e => setSearch(sanitizeInput(e.target.value))} 
@@ -956,14 +908,5 @@ export function AttendancePage() {
   );
 }
 
-// Helper function for notifications (add this if not already available)
-function showNotification(message: string, type: 'success' | 'error' | 'info') {
-  // Simple alert for now - replace with your actual notification system
-  if (type === 'success') {
-    console.log('✅', message);
-  } else if (type === 'error') {
-    console.error('❌', message);
-  } else {
-    console.info('ℹ️', message);
-  }
-}
+
+export default AttendancePage;

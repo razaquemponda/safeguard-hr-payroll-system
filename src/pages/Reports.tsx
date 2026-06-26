@@ -689,3 +689,5 @@ export function ReportsPage() {
     </div>
   );
 }
+
+	export default ReportsPage;

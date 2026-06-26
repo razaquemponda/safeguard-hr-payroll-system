@@ -1,6 +1,47 @@
-﻿// Simple notification function
-export const showNotification = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
-  alert(message);
+﻿// src/utils/clickHandlers.ts
+
+// ===== SAFE STRINGIFY FUNCTION =====
+const safeStringify = (value: any): string => {
+  try {
+    if (value === null) return 'null';
+    if (value === undefined) return 'undefined';
+    if (typeof value === 'symbol') return value.toString();
+    if (typeof value === 'function') return `[Function: ${value.name || 'anonymous'}]`;
+    if (typeof value === 'object') {
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return Object.prototype.toString.call(value);
+      }
+    }
+    return String(value);
+  } catch {
+    return '[Unable to convert]';
+  }
+};
+
+// ===== SAFE NOTIFICATION FUNCTION =====
+export const showNotification = (message: any, type: 'success' | 'error' | 'info' = 'success') => {
+  // Ensure message is a string
+  let safeMessage = '';
+  try {
+    if (typeof message === 'object') {
+      try {
+        safeMessage = JSON.stringify(message);
+      } catch {
+        safeMessage = Object.prototype.toString.call(message);
+      }
+    } else if (message === null || message === undefined) {
+      safeMessage = 'Unknown message';
+    } else {
+      safeMessage = String(message);
+    }
+  } catch {
+    safeMessage = 'Unable to display message';
+  }
+  
+  // Use alert for now (or your preferred notification method)
+  alert(safeMessage);
 };
 
 // Store employees data
@@ -10,7 +51,7 @@ export function setEmployeesData(employees: any[]) {
   employeesCache = employees;
 }
 
-// REAL Payroll Processing Function
+// ===== PAYROLL PROCESSING FUNCTION =====
 export const handleProcessPayroll = (
   employees: any[], 
   setEmployees: (emps: any[]) => void, 
@@ -63,13 +104,13 @@ export const handleProcessPayroll = (
   const totalPayroll = processedEmployees.reduce((sum, emp) => sum + emp.netPay, 0);
   const employeeCount = processedEmployees.length;
   
-  const message = `✅ Payroll processed for ${new Date().toLocaleString('default', { month: 'long', year: 'numeric' })}!\n\n📊 Total Employees: ${employeeCount}\n💰 Total Payroll: MK ${totalPayroll.toLocaleString()}\n📈 Average Salary: MK ${Math.round(totalPayroll / employeeCount).toLocaleString()}`;
+  const message = `✅ Payroll processed for ${new Date().toLocaleString('default', { month: 'long', year: 'numeric' })!}\n\n📊 Total Employees: ${employeeCount}\n💰 Total Payroll: MK ${totalPayroll.toLocaleString()}\n📈 Average Salary: MK ${Math.round(totalPayroll / employeeCount).toLocaleString()}`;
   
   showNotification(message, 'success');
   return processedEmployees;
 };
 
-// PDF Report Generation Function
+// ===== PDF REPORT GENERATION FUNCTION =====
 export const handleExportPDF = (reportType: string) => {
   const employees = employeesCache;
   
@@ -106,8 +147,8 @@ export const handleExportPDF = (reportType: string) => {
     const totalEmployees = employees.length;
     const totalPayroll = employees.reduce((sum, emp) => sum + (emp.netPay || emp.basicSalary || 0), 0);
     const averageSalary = totalPayroll / totalEmployees;
-    const departments = [...new Set(employees.map(emp => emp.department))];
-    const activeEmployees = employees.filter(emp => emp.status === 'Active').length;
+    const departments = [...new Set(employees.map((emp: any) => emp.department))];
+    const activeEmployees = employees.filter((emp: any) => emp.status === 'Active').length;
     
     pdf.setFontSize(11);
     pdf.setTextColor(8, 28, 58);
@@ -141,8 +182,8 @@ export const handleExportPDF = (reportType: string) => {
     pdf.setTextColor(0, 0, 0);
     pdf.setFont('helvetica', 'normal');
     
-    departments.forEach(dept => {
-      const deptEmployees = employees.filter(emp => emp.department === dept);
+    departments.forEach((dept: string) => {
+      const deptEmployees = employees.filter((emp: any) => emp.department === dept);
       const deptPayroll = deptEmployees.reduce((sum, emp) => sum + (emp.netPay || emp.basicSalary || 0), 0);
       pdf.text(`${dept}: ${deptEmployees.length} employees | MK ${Math.round(deptPayroll).toLocaleString()}`, 25, y);
       y += 6;
@@ -166,67 +207,97 @@ export const handleExportPDF = (reportType: string) => {
     pdf.save(`${reportType.replace(/\s/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`);
     
     showNotification(`📄 ${reportType} generated successfully!\n\n📊 Total Employees: ${totalEmployees}\n💰 Total Payroll: MK ${Math.round(totalPayroll).toLocaleString()}\n📁 PDF downloaded to your computer`, 'success');
-  }).catch(error => {
+  }).catch((error: any) => {
     console.error('Failed to load jsPDF:', error);
     showNotification('PDF generation failed. Please try again.', 'error');
   });
 };
 
-// Other handlers
+// ===== OTHER HANDLERS =====
 export const handleExportExcel = handleExportPDF;
 export const handleExportCSV = handleExportPDF;
-export const handleAddEmployee = (setModalOpen: (open: boolean) => void) => { setModalOpen(true); };
+
+export const handleAddEmployee = (setModalOpen: (open: boolean) => void) => { 
+  setModalOpen(true); 
+};
+
 export const handleEditEmployee = (employee: any, setSelectedEmployee: (emp: any) => void, setModalOpen: (open: boolean) => void) => {
   setSelectedEmployee(employee);
   setModalOpen(true);
 };
+
 export const handleDeleteEmployee = (employeeId: string, employees: any[], setEmployees: (emps: any[]) => void) => {
   if (confirm('Are you sure you want to delete this employee?')) {
-    const updated = employees.filter(emp => emp.id !== employeeId);
+    const updated = employees.filter((emp: any) => emp.id !== employeeId);
     setEmployees(updated);
     showNotification('Employee deleted successfully', 'success');
   }
 };
+
+// ===== UPDATED: handleHireEmployee with safe data =====
 export const handleHireEmployee = (applicant: any, employees: any[], setEmployees: (emps: any[]) => void, setApplicants: (apps: any[]) => void) => {
+  // Safely extract applicant data
+  const safeName = applicant?.name || applicant?.fullName || 'Unknown';
+  const safePosition = applicant?.position || 'Security Guard';
+  const safeDepartment = applicant?.department || 'Security Operations';
+  const safeSalary = applicant?.expectedSalary || 300000;
+  const safeEmail = applicant?.email || `${safeName.toLowerCase().replace(/\s/g, '.')}@safeguard.mw`;
+  const safePhone = applicant?.phone || '+265 888 XXX XXX';
+  
   const newEmployee = {
     id: Date.now(),
     employeeId: `SG-${Math.floor(Math.random() * 10000)}`,
-    fullName: applicant.name || applicant.fullName,
-    position: applicant.position,
-    department: applicant.department || 'Security Operations',
+    fullName: safeName,
+    position: safePosition,
+    department: safeDepartment,
     status: 'Active',
-    basicSalary: applicant.expectedSalary || 300000,
-    email: applicant.email || `${applicant.name?.toLowerCase().replace(/\s/g, '.')}@safeguard.mw`,
-    phone: applicant.phone || '+265 888 XXX XXX',
+    basicSalary: safeSalary,
+    email: safeEmail,
+    phone: safePhone,
     hireDate: new Date().toISOString().split('T')[0],
     guardId: `G-${Math.floor(Math.random() * 1000)}`,
     deploymentSite: 'To be assigned',
     shift: 'Rotational'
   };
+  
   setEmployees([...employees, newEmployee]);
-  setApplicants(applicants.filter(a => a.id !== applicant.id));
-  showNotification(`🎉 ${applicant.name || applicant.fullName} has been hired!`, 'success');
+  setApplicants((applicants || []).filter((a: any) => a.id !== applicant?.id));
+  showNotification(`🎉 ${safeName} has been hired!`, 'success');
 };
+
 export const handleDownloadPayslip = (employee: any, month: string) => {
-  showNotification(`📄 Preparing payslip for ${employee.fullName} - ${month}`, 'info');
+  const safeName = employee?.fullName || 'Unknown';
+  showNotification(`📄 Preparing payslip for ${safeName} - ${month}`, 'info');
 };
+
 export const handleShortlist = (applicantId: string, applicants: any[], setApplicants: (apps: any[]) => void) => {
-  const updated = applicants.map(app => app.id === applicantId ? { ...app, interviewStatus: 'Shortlisted' } : app);
+  const updated = (applicants || []).map((app: any) => 
+    app.id === applicantId ? { ...app, interviewStatus: 'Shortlisted' } : app
+  );
   setApplicants(updated);
   showNotification('📋 Applicant shortlisted', 'success');
 };
+
 export const handleScheduleInterview = (applicantId: string, applicants: any[], setApplicants: (apps: any[]) => void) => {
-  const updated = applicants.map(app => app.id === applicantId ? { ...app, interviewStatus: 'Interview Scheduled' } : app);
+  const updated = (applicants || []).map((app: any) => 
+    app.id === applicantId ? { ...app, interviewStatus: 'Interview Scheduled' } : app
+  );
   setApplicants(updated);
   showNotification('📅 Interview scheduled', 'info');
 };
+
 export const handleAccept = (applicantId: string, applicants: any[], setApplicants: (apps: any[]) => void) => {
-  const updated = applicants.map(app => app.id === applicantId ? { ...app, decision: 'Accepted', interviewStatus: 'Passed' } : app);
+  const updated = (applicants || []).map((app: any) => 
+    app.id === applicantId ? { ...app, decision: 'Accepted', interviewStatus: 'Passed' } : app
+  );
   setApplicants(updated);
   showNotification('✅ Applicant accepted', 'success');
 };
+
 export const handleReject = (applicantId: string, applicants: any[], setApplicants: (apps: any[]) => void) => {
-  const updated = applicants.map(app => app.id === applicantId ? { ...app, decision: 'Rejected', interviewStatus: 'Failed' } : app);
+  const updated = (applicants || []).map((app: any) => 
+    app.id === applicantId ? { ...app, decision: 'Rejected', interviewStatus: 'Failed' } : app
+  );
   setApplicants(updated);
   showNotification('❌ Applicant rejected', 'error');
 };

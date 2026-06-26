@@ -1,6 +1,6 @@
 // src/components/ErrorBoundary.tsx
 
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import { Component, ErrorInfo, ReactNode } from 'react';
 
 interface Props {
   children: ReactNode;
@@ -23,7 +23,9 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('Uncaught error:', error, errorInfo);
+    // ===== FIXED: Don't try to stringify the error object =====
+    console.error('Uncaught error:', error);
+    console.error('Component stack:', errorInfo.componentStack);
   }
 
   render() {
@@ -43,9 +45,16 @@ export class ErrorBoundary extends Component<Props, State> {
             <h2 className="text-xl font-bold text-slate-800 mb-2">
               Something went wrong
             </h2>
-            <p className="text-slate-600 mb-6">
+            <p className="text-slate-600 mb-4">
               We're looking into it. Please try refreshing the page.
             </p>
+            {this.state.error && (
+              <div className="bg-slate-100 rounded-lg p-3 mb-4 text-left">
+                <p className="text-xs text-slate-500 font-mono break-all">
+                  {this.state.error.message}
+                </p>
+              </div>
+            )}
             <div className="space-y-3">
               <button
                 onClick={() => window.location.reload()}
