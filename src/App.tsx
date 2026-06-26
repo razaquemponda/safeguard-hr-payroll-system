@@ -43,7 +43,15 @@ export default function App() {
     const checkSession = async () => {
       const perf = measurePerformance('Session Check');
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        // ===== FIX: Add timeout to prevent infinite loading =====
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Session check timeout')), 5000)
+        );
+        
+        const sessionPromise = supabase.auth.getSession();
+        const result = await Promise.race([sessionPromise, timeoutPromise]) as any;
+        
+        const { data: { session } } = result;
         setLoggedIn(!!session);
 
         if (session?.user) {
@@ -63,13 +71,18 @@ export default function App() {
             }
           }
         }
-      } catch (error) {
-        if (process.env.NODE_ENV === 'production') {
-          logger.error('Session check failed', error);
+      } catch (error: any) {
+        // ===== FIX: Handle timeout or other errors =====
+        console.error('Session check failed:', error);
+        if (error.message === 'Session check timeout') {
+          console.warn('Session check timed out, redirecting to login...');
         }
+        // If session check fails, show login page
+        setLoggedIn(false);
+      } finally {
+        setLoading(false);
+        perf.end();
       }
-      setLoading(false);
-      perf.end();
     };
 
     checkSession();
@@ -86,10 +99,24 @@ export default function App() {
       } else {
         setUserRoleLevel(4);
       }
+      // ===== FIX: Ensure loading is false when auth state changes =====
+      setLoading(false);
     });
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // ===== FIX: Add a fallback timeout to force loading to complete =====
+  useEffect(() => {
+    const forceLoadingTimeout = setTimeout(() => {
+      if (loading) {
+        console.warn('Loading forced to complete after 5 seconds');
+        setLoading(false);
+      }
+    }, 5000);
+
+    return () => clearTimeout(forceLoadingTimeout);
+  }, [loading]);
 
   if (loading) {
     return (

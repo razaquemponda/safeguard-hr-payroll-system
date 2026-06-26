@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Shield, Lock, User, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-// ===== NEW: Import rate limiter =====
 import { checkRateLimit } from '../utils/rateLimiter';
 
 export function LoginPage({ onLogin }: { onLogin: () => void }) {
@@ -28,12 +27,10 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
       return;
     }
 
-    // ===== NEW: Check rate limit before attempting login =====
-    // Use the email as the user identifier for rate limiting
+    // Check rate limit
     const rateLimitResult = checkRateLimit(username.trim().toLowerCase());
     
     if (!rateLimitResult.allowed) {
-      // Calculate remaining block time in seconds
       const remainingSeconds = Math.ceil((rateLimitResult.resetTime - Date.now()) / 1000);
       const minutes = Math.floor(remainingSeconds / 60);
       const seconds = remainingSeconds % 60;
@@ -51,14 +48,12 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
     }
 
     try {
-      // Try to sign in with Supabase
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email: username.trim(),
         password: password
       });
 
       if (signInError) {
-        // Handle different error types with user-friendly messages
         if (signInError.message.includes('Invalid login credentials')) {
           setError('Invalid email or password. Please try again.');
         } else if (signInError.message.includes('Email not confirmed')) {
@@ -73,7 +68,6 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
       }
 
       if (data?.user) {
-        // Fetch user profile to verify access
         const { data: profile, error: profileError } = await supabase
           .from("profiles")
           .select("role_level, full_name, is_super_admin, region_id")
@@ -102,7 +96,6 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#081C3A] via-[#0c2a56] to-[#081C3A] flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Decorative shapes */}
       <div className="absolute top-0 -right-40 w-96 h-96 bg-[#D4A017]/10 rounded-full blur-3xl" />
       <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-[#D4A017]/5 rounded-full blur-3xl" />
       <div className="absolute inset-0" style={{
@@ -110,7 +103,6 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
       }} />
 
       <div className="relative grid lg:grid-cols-2 gap-8 max-w-5xl w-full z-10">
-        {/* Left: Brand / Description */}
         <div className="hidden lg:flex flex-col justify-between text-white p-10 rounded-2xl bg-white/5 backdrop-blur border border-white/10">
           <div>
             <div className="flex items-center gap-3 mb-10">
@@ -145,7 +137,6 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
           </div>
         </div>
 
-        {/* Right: Login Form */}
         <div className="bg-white rounded-2xl shadow-2xl p-8 md:p-10 flex flex-col justify-center">
           <div className="lg:hidden flex items-center gap-3 mb-8 justify-center">
             <div className="w-12 h-12 rounded-xl bg-[#081C3A] flex items-center justify-center">
